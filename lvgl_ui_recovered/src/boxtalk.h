@@ -87,6 +87,14 @@ int  boxtalk_temp_override_active(void);
  * preset button highlighted while active_state is parked at -1. */
 int  boxtalk_temp_override_origin(void);
 
+/* Per-preset room-setpoint stored inside happ_thermstat. state in 0..3
+ * (Comfort/Home/Sleep/Away). Get returns centi-°C (1850 = 18.5 °C) or -1
+ * on error. Set takes centi-°C, clamps to [500, 3000]; returns 0 on
+ * success. These are the temperatures the schedule daemon snaps to when
+ * it transitions between presets. */
+int boxtalk_get_state_value(int state);
+int boxtalk_set_state_value(int state, int centi);
+
 /* Request an RRD archive from hcb_rrd. Response arrives asynchronously
    and is stored in rrd_response_buf (NUL-terminated XML). Caller polls
    rrd_response_ready (0/1). After consuming, clear ready by writing 0. */

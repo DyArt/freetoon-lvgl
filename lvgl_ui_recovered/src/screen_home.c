@@ -1202,10 +1202,10 @@ lv_obj_t * screen_home_create(void) {
     /* Active program (Manual / Scheduled: <preset>). Wrapped in a clickable
        pill so taps land on a generous hit area. Single tap toggles between
        Manual and Scheduled — the full Comfort/Home/Sleep/Away picker lives
-       on the heater-detail page. Width bumped to 320 so "Scheduled: Comfort"
-       fits at 22-pt without ellipsis. */
+       on the heater-detail page. Width 420 so the longest label
+       ("Manual  -  tap to resume") fits at 22-pt without clipping. */
     lv_obj_t * prog_pill = lv_obj_create(th);
-    lv_obj_set_size(prog_pill, 320, 52);
+    lv_obj_set_size(prog_pill, 420, 52);
     lv_obj_align(prog_pill, LV_ALIGN_CENTER, 0, 70);
     lv_obj_set_style_bg_color(prog_pill, lv_color_hex(0x1a3a5a), 0);
     lv_obj_set_style_radius(prog_pill, 22, 0);

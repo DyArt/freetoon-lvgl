@@ -552,6 +552,54 @@ static void open_heating_modal(lv_event_t * e) {
     modal_timer = lv_timer_create(modal_timer_cb, 1000, NULL);
 }
 
+/* ---------- Preset temperatures ---------- */
+/* Each scheme state (0=Comfort..3=Away) has a stored room-setpoint inside
+ * happ_thermstat — that's the temperature the schedule daemon snaps to
+ * when it transitions between presets, AND what the one-tap preset
+ * buttons on the home/heater screens apply. Without an editor those
+ * values can only be set via the stock Toon UI (which we replaced) or
+ * by hand-poking the HTTP API. */
+static lv_obj_t * lbl_preset_val[4];
+static int        last_preset_centi[4] = {-1,-1,-1,-1};
+
+static void on_preset_change(lv_event_t * e) {
+    int idx = (int)(intptr_t)lv_event_get_user_data(e);
+    int v = lv_slider_get_value(lv_event_get_target(e));
+    /* Quantise to 0.5 °C steps so the displayed value matches the schedule
+     * editor's resolution and we don't write a fresh HTTP for each pixel. */
+    int snapped = ((v + 25) / 50) * 50;
+    if (snapped < 500)  snapped = 500;
+    if (snapped > 3000) snapped = 3000;
+    if (lbl_preset_val[idx])
+        lv_label_set_text_fmt(lbl_preset_val[idx], "%.1f C", snapped / 100.0f);
+    if (snapped != last_preset_centi[idx]) {
+        last_preset_centi[idx] = snapped;
+        boxtalk_set_state_value(idx, snapped);
+    }
+}
+
+static void open_presets_modal(lv_event_t * e) {
+    (void)e;
+    lv_obj_t * p = modal_open("Preset temperatures", 430);
+    static const char * names[4] = {"Comfort", "Home", "Sleep", "Away"};
+    int y = 70;
+    for (int i = 0; i < 4; i++) {
+        int v = boxtalk_get_state_value(i);
+        if (v < 500) v = 2000;   /* fallback if happ_thermstat unreachable */
+        last_preset_centi[i] = v;
+        lv_obj_t * r = panel_row(p, y, names[i], &lbl_preset_val[i]);
+        lv_label_set_text_fmt(lbl_preset_val[i], "%.1f C", v / 100.0f);
+        lv_obj_t * s = lv_slider_create(r);
+        lv_obj_set_size(s, 760, 14);
+        lv_obj_align(s, LV_ALIGN_BOTTOM_MID, 0, -2);
+        lv_slider_set_range(s, 500, 3000);
+        lv_slider_set_value(s, v, LV_ANIM_OFF);
+        lv_obj_add_event_cb(s, on_preset_change, LV_EVENT_VALUE_CHANGED,
+                            (void *)(intptr_t)i);
+        y += 84;
+    }
+}
+
 static void open_about_modal(lv_event_t * e) {
     (void)e;
     lv_obj_t * p = modal_open("About", 320);
@@ -1573,9 +1621,11 @@ lv_obj_t * screen_settings_create(void) {
               "off / proxy / wireless", open_otbridge_modal);
     make_tile(x0 + 2*(308+gap), row2, NULL, LV_SYMBOL_WIFI, "MQTT",
               "broker + topics", open_mqtt_modal);
-    make_tile(x0 + 0*(308+gap), row3, NULL, LV_SYMBOL_LIST, "About",
+    make_tile(x0 + 0*(308+gap), row3, &icon_radiator, NULL, "Presets",
+              "Comfort/Home/Sleep/Away setpoints", open_presets_modal);
+    make_tile(x0 + 1*(308+gap), row3, NULL, LV_SYMBOL_LIST, "About",
               "status & diagnostics", open_about_modal);
-    make_tile(x0 + 1*(308+gap), row3, NULL, LV_SYMBOL_EYE_CLOSE, "Clean",
+    make_tile(x0 + 2*(308+gap), row3, NULL, LV_SYMBOL_EYE_CLOSE, "Clean",
               "30 s screen lock to wipe", open_clean_modal);
 
     return scr_root;

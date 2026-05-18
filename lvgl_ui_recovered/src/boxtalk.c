@@ -100,7 +100,7 @@ const char* program_label(void) {
         origin = temp_override_origin;
     int preset_idx = (toon_state.active_state >= 0)
                          ? toon_state.program_state : origin;
-    if (preset_idx < 0) return "Manual";
+    if (preset_idx < 0) return "Manual  -  tap to resume";
     const char * preset;
     switch (preset_idx) {
         case 0: preset = "Comfort"; break;
@@ -759,6 +759,37 @@ int boxtalk_set_setpoint(float temp) {
     /* optimistic local update so UI feels instant; BoxTalk query will confirm */
     if (rc == 0) toon_state.setpoint = centi / 100.0f;
     boxtalk_request_setpoint_refresh();
+    return rc;
+}
+
+/* Per-preset temperatures. Each scheme state (0=Comfort, 1=Home, 2=Sleep,
+ * 3=Away) has a stored room-setpoint in happ_thermstat — that's what the
+ * schedule daemon snaps to when it transitions. Returns centi-°C
+ * (1850 = 18.50 °C) or -1 on error / unknown response. */
+int boxtalk_get_state_value(int state) {
+    if (state < 0 || state > 3) return -1;
+    char body[256];
+    char q[64];
+    snprintf(q, sizeof(q), "action=getStateValue&stateId=%d", state);
+    if (http_get_thermstat_full(q, body, sizeof(body)) != 0) return -1;
+    const char * p = strstr(body, "stateValue");
+    if (!p) return -1;
+    /* skip "stateValue": then optional space + : (handles both ":1850" and ": 1850") */
+    p += strlen("stateValue");
+    while (*p && (*p == '"' || *p == ':' || *p == ' ')) p++;
+    return atoi(p);
+}
+
+int boxtalk_set_state_value(int state, int centi) {
+    if (state < 0 || state > 3) return -1;
+    if (centi < 500)  centi = 500;
+    if (centi > 3000) centi = 3000;
+    char q[80];
+    snprintf(q, sizeof(q),
+             "action=updateStateValue&stateId=%d&newValue=%d", state, centi);
+    int rc = http_get_thermstat(q);
+    fprintf(stderr, "[bxt] updateStateValue state=%d val=%d rc=%d\n",
+            state, centi, rc);
     return rc;
 }
 

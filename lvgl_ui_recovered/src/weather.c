@@ -184,8 +184,13 @@ static int parse_buienradar(const char * body) {
  * after the first-future, and stop at WEATHER_FORECAST_HOURS. */
 static int parse_buienradar_hourly(const char * body) {
     weather_state.hour_count = 0;
-    /* The whole document is one big object; scan linearly. */
-    const char * p = body;
+    /* Skip past the day-level prelude (location, afternoon{...}, evening{...})
+     * and only parse datetimes from the first "hours":[ array onwards. The
+     * afternoon/evening blocks have their own "datetime" fields but no plain
+     * "temperature" key — they'd otherwise be picked up as bogus 0 °C slots.
+     */
+    const char * p = strstr(body, "\"hours\":[");
+    if (!p) p = body;
     int picked = 0;
     int skip = 0;
     while (picked < WEATHER_FORECAST_HOURS) {
@@ -211,6 +216,14 @@ static int parse_buienradar_hourly(const char * body) {
                      iso[11], iso[12], iso[14], iso[15]);
         else
             snprintf(h.label, sizeof h.label, "%s", iso);
+
+        /* Skip anything that isn't a per-hour entry — buienradar inserts
+         * day-level "afternoon"/"evening" slots that have their own
+         * datetime but no plain "temperature" key, which would render as
+         * bogus 0 °C. timetype=="Hour" is the only hourly bucket we want. */
+        char timetype[16] = {0};
+        js_str(dt_end, slot_end, "timetype", timetype, sizeof timetype);
+        if (strcmp(timetype, "Hour") != 0) { p = slot_end; continue; }
 
         h.temperature = (float)js_num(dt_end, slot_end, "temperature", 0);
         h.wind_bft    = (int)js_num(dt_end, slot_end, "beaufort", 0);
@@ -242,6 +255,24 @@ static int fetch_buienradar_hourly(void) {
     if (http_fetch(url, body, sizeof body) != 0) {
         weather_state.hour_count = 0;
         return -1;
+    }
+    /* Sanity-gate the response. Buienradar's /forecast/<id> accepts any
+     * GeoNames id worldwide — if the user copy-pasted a KNMI station code
+     * (e.g. 6249 for Berkhout) they get a forecast for somewhere random
+     * (lat 33.75 lon 45.97 → Iraq, 30 °C in May). Drop the data and force
+     * the daily fallback if the resolved location is outside the NL/BE
+     * bounding box. */
+    const char * loc = strstr(body, "\"location\"");
+    if (loc) {
+        double lat = js_num(loc, loc + 200, "lat", 0);
+        double lon = js_num(loc, loc + 200, "lon", 0);
+        if (lat < 49.0 || lat > 54.5 || lon < 2.0 || lon > 8.0) {
+            fprintf(stderr, "[wx] location id %d resolves to lat=%.2f lon=%.2f "
+                            "(outside NL/BE) — dropping forecast\n",
+                    id, lat, lon);
+            weather_state.hour_count = 0;
+            return -1;
+        }
     }
     return parse_buienradar_hourly(body);
 }

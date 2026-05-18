@@ -396,18 +396,21 @@ lv_obj_t * screen_dim_create(void) {
     lv_obj_align(dim_img_flame, LV_ALIGN_CENTER, 145, 45);
     lv_obj_add_flag(dim_img_flame, LV_OBJ_FLAG_HIDDEN);
 
+    /* DHW faucet fully red — see screen_home.c for rationale. */
     dim_img_faucet = lv_img_create(scr_root);
     lv_img_set_src(dim_img_faucet, &icon_faucet);
     lv_img_set_zoom(dim_img_faucet, 256);
-    lv_obj_set_style_img_recolor(dim_img_faucet, lv_color_hex(0xcccccc), 0);
+    lv_obj_set_style_img_recolor(dim_img_faucet, lv_color_hex(0xff5544), 0);
     lv_obj_set_style_img_recolor_opa(dim_img_faucet, 255, 0);
     lv_obj_align(dim_img_faucet, LV_ALIGN_CENTER, 140, 35);
     lv_obj_add_flag(dim_img_faucet, LV_OBJ_FLAG_HIDDEN);
 
+    /* DHW drop in RED to distinguish from the blue cold-water-flow drop —
+     * see comment in screen_home.c next to tile_img_drop. */
     dim_img_drop = lv_img_create(scr_root);
     lv_img_set_src(dim_img_drop, &icon_drop);
     lv_img_set_zoom(dim_img_drop, 256);
-    lv_obj_set_style_img_recolor(dim_img_drop, lv_color_hex(0x66bbff), 0);
+    lv_obj_set_style_img_recolor(dim_img_drop, lv_color_hex(0xff5544), 0);
     lv_obj_set_style_img_recolor_opa(dim_img_drop, 255, 0);
     lv_obj_align(dim_img_drop, LV_ALIGN_CENTER, 158, 55);
     lv_obj_add_flag(dim_img_drop, LV_OBJ_FLAG_HIDDEN);

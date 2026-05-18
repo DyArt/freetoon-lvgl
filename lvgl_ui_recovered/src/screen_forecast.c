@@ -181,14 +181,22 @@ lv_obj_t * screen_forecast_create(void) {
     lv_obj_align(lbl_title, LV_ALIGN_TOP_LEFT, 440, 100);
     lv_label_set_text(lbl_title, "Weersverwachting");
 
-    /* Body text — wrapped + clipped at 340 px tall so it doesn't run
-       over the 5-day strip at the bottom. */
-    lbl_body = lv_label_create(scr_root);
+    /* Body text — wrap inside a vertically-scrollable container so the
+     * full weather report is readable. Previously the LONG_DOT mode
+     * truncated everything past ~340 px tall with an ellipsis. */
+    lv_obj_t * body_scroll = lv_obj_create(scr_root);
+    lv_obj_set_size(body_scroll, 560, 340);
+    lv_obj_align(body_scroll, LV_ALIGN_TOP_LEFT, 440, 150);
+    lv_obj_set_style_bg_opa(body_scroll, LV_OPA_TRANSP, 0);
+    lv_obj_set_style_border_width(body_scroll, 0, 0);
+    lv_obj_set_style_pad_all(body_scroll, 0, 0);
+    lv_obj_set_scroll_dir(body_scroll, LV_DIR_VER);
+    lv_obj_set_scrollbar_mode(body_scroll, LV_SCROLLBAR_MODE_AUTO);
+    lbl_body = lv_label_create(body_scroll);
     lv_obj_set_style_text_color(lbl_body, lv_color_hex(0xbbbbbb), 0);
     lv_obj_set_style_text_font(lbl_body, &lv_font_montserrat_18, 0);
-    lv_obj_set_size(lbl_body, 540, 340);
-    lv_label_set_long_mode(lbl_body, LV_LABEL_LONG_DOT);
-    lv_obj_align(lbl_body, LV_ALIGN_TOP_LEFT, 440, 150);
+    lv_obj_set_width(lbl_body, 540);
+    lv_label_set_long_mode(lbl_body, LV_LABEL_LONG_WRAP);
     lv_label_set_text(lbl_body, "(laden...)");
 
     /* 5-day forecast strip — same column anatomy as the home band: day

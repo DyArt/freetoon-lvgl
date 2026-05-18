@@ -51,6 +51,54 @@ static stats_series_t  series2;   /* for elec second tariff */
 
 static void on_back(lv_event_t * e) { (void)e; ui_pop(); }
 
+/* X-axis label override. LVGL hands us each tick value (0..major_cnt-1).
+ * We translate to a period-appropriate string (clock time for hour/day,
+ * date for week+). Without this hook the X axis shows bare indices. */
+static int g_xtick_compact_count = 0;
+static void chart_draw_x_label(lv_event_t * e) {
+    lv_obj_draw_part_dsc_t * dsc = lv_event_get_draw_part_dsc(e);
+    if (!dsc) return;
+    /* In LVGL 8.3, chart's tick-label draw events for the X axis arrive
+     * with dsc->text != NULL and a non-zero text_length; identify the X
+     * axis by dsc->id. Don't require dsc->part — its value differs
+     * between versions and adding the check silently dropped every
+     * label. */
+    if (dsc->text == NULL || dsc->text_length < 4) return;
+    if (dsc->id != LV_CHART_AXIS_PRIMARY_X) return;
+    /* dsc->value is the tick ordinal (0..major-1). Map to a sample index
+     * in the compacted series and copy that sample's short label. */
+    if (g_xtick_compact_count <= 0 || series.n <= 0) {
+        dsc->text[0] = 0; return;
+    }
+    /* Find the Nth real (non-NaN) sample. */
+    int target_ord = dsc->value;   /* 0 = leftmost tick */
+    int major_minus1 = 4;           /* matches the (5,0) tick spec below */
+    if (target_ord < 0) target_ord = 0;
+    if (target_ord > major_minus1) target_ord = major_minus1;
+    int wanted_real_idx = target_ord * (g_xtick_compact_count - 1) / major_minus1;
+    int real_seen = 0;
+    for (int i = 0; i < series.n; i++) {
+        if (isnan(series.samples[i])) continue;
+        if (real_seen == wanted_real_idx) {
+            /* labels[i] is "DD-MM HH:MM"; for hour/day show "HH:MM", for
+             * longer periods show "DD-MM". */
+            const char * lab = series.labels[i];
+            if (selected_period == PERIOD_HOUR || selected_period == PERIOD_DAY) {
+                if (strlen(lab) >= 11) {
+                    /* skip the "DD-MM " prefix */
+                    snprintf(dsc->text, dsc->text_length, "%s", lab + 6);
+                } else snprintf(dsc->text, dsc->text_length, "%s", lab);
+            } else {
+                /* take just "DD-MM" */
+                snprintf(dsc->text, dsc->text_length, "%.5s", lab);
+            }
+            return;
+        }
+        real_seen++;
+    }
+    dsc->text[0] = 0;
+}
+
 /* Per-period: which logger + rra to use, and whether to diff-aggregate.
    Returns 0 if loaded. */
 static int load_for_period(void) {
@@ -152,6 +200,7 @@ static void render_chart(void) {
     if (cn < 2) cn = 2;
 
     lv_chart_set_point_count(chart, cn);
+    g_xtick_compact_count = cn;       /* used by chart_draw_x_label */
     lv_chart_set_range(chart, LV_CHART_AXIS_PRIMARY_Y,
                        (lv_coord_t)(lo - pad), (lv_coord_t)(hi + pad));
     for (int i = 0; i < cn; i++) {
@@ -313,6 +362,11 @@ lv_obj_t * screen_stats_create(void) {
     /* Y axis tick labels — 5 major divisions, 2 minor in between, draw_size
      * 60 reserves the space LVGL needs for the rendered numbers. */
     lv_chart_set_axis_tick(chart, LV_CHART_AXIS_PRIMARY_Y, 8, 4, 5, 2, true, 60);
+    /* X axis tick labels via the chart's DRAW_PART hook so we can write
+     * the compact time-of-sample strings ("11:00", "Mon", …) the period
+     * tab implies, instead of the bare index integers LVGL would print. */
+    lv_chart_set_axis_tick(chart, LV_CHART_AXIS_PRIMARY_X, 8, 4, 5, 0, true, 30);
+    lv_obj_add_event_cb(chart, chart_draw_x_label, LV_EVENT_DRAW_PART_BEGIN, NULL);
     lv_obj_set_style_bg_color(chart, lv_color_hex(0x1a2a44), 0);
     lv_obj_set_style_border_color(chart, lv_color_hex(0x335577), 0);
     lv_obj_set_style_border_width(chart, 1, 0);

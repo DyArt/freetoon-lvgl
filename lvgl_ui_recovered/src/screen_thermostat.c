@@ -29,12 +29,23 @@ static lv_obj_t * img_temp_flame;
 static lv_obj_t * lbl_clock;
 static lv_obj_t * lbl_date;
 static lv_timer_t * refresh_timer = NULL;
+/* Program preset buttons (Manual / Comfort / Home / Sleep / Away) just
+ * below the indoor temp — same actions as the home-tile lacks. The active
+ * one gets a white outline mirroring the vent-tile highlight pattern. */
+static lv_obj_t * btn_prog[5] = {0};
+static const int  prog_state[5] = {-1, 0, 1, 2, 3};   /* manual, C, H, S, A */
 
 static void on_open_advanced(lv_event_t * e) { (void)e; ui_push(screen_heater_advanced_create()); }
 static void on_setpoint_up(lv_event_t * e) { boxtalk_setpoint_increase(); }
 static void on_setpoint_down(lv_event_t * e) { boxtalk_setpoint_decrease(); }
 static void on_back(lv_event_t * e) { ui_pop(); }
 static void on_open_schedule(lv_event_t * e) { (void)e; ui_push(screen_schedule_create()); }
+static void on_program_tap(lv_event_t * e) {
+    int idx = (int)(intptr_t)lv_event_get_user_data(e);
+    int s = prog_state[idx];
+    if (s < 0) boxtalk_set_manual();
+    else       boxtalk_set_program(s);
+}
 
 static void refresh_cb(lv_timer_t * t) {
     (void)t;
@@ -58,6 +69,16 @@ static void refresh_cb(lv_timer_t * t) {
 
     if (toon_state.indoor_temp > 0)
         lv_label_set_text_fmt(lbl_temp, "%.1f C", display_indoor_temp(toon_state.indoor_temp));
+
+    /* Program-preset highlight: white border on the active one. Manual
+     * wins when active_state < 0 regardless of program_state. */
+    int active_idx = (toon_state.active_state < 0) ? 0 : toon_state.program_state + 1;
+    if (active_idx < 0 || active_idx > 4) active_idx = 0;
+    for (int i = 0; i < 5; i++) {
+        if (btn_prog[i])
+            lv_obj_set_style_border_width(btn_prog[i],
+                                          (i == active_idx) ? 2 : 0, 0);
+    }
     if (toon_state.humidity > 0)
         lv_label_set_text_fmt(lbl_humidity, "RH %.0f%%", toon_state.humidity);
     if (toon_state.eco2 || toon_state.tvoc)
@@ -203,6 +224,35 @@ lv_obj_t * screen_thermostat_create(void) {
     lv_obj_set_style_img_recolor_opa(img_temp_flame, 255, 0);
     lv_obj_align(img_temp_flame, LV_ALIGN_CENTER, 145, -75);
     lv_obj_add_flag(img_temp_flame, LV_OBJ_FLAG_HIDDEN);
+
+    /* Program preset row — five small buttons centered horizontally just
+     * below the indoor temp. Manual matches active_state < 0; the other
+     * four send boxtalk_set_program(0..3). Colours mirror the schedule
+     * editor pills for instant recognition. */
+    {
+        const char * names[5] = {"Manual", "Comfort", "Home", "Sleep", "Away"};
+        uint32_t     cols[5]  = {0x6a5424, 0xcc7733, 0x3377cc, 0x553388, 0x557788};
+        const int    bw = 130, bh = 44, gap = 8;
+        int total = 5 * bw + 4 * gap;
+        for (int i = 0; i < 5; i++) {
+            lv_obj_t * b = lv_btn_create(scr_root);
+            lv_obj_set_size(b, bw, bh);
+            lv_obj_align(b, LV_ALIGN_CENTER,
+                         -total / 2 + i * (bw + gap) + bw / 2, -20);
+            lv_obj_set_style_bg_color(b, lv_color_hex(cols[i]), 0);
+            lv_obj_set_style_radius(b, 10, 0);
+            lv_obj_set_style_border_color(b, lv_color_hex(0xffffff), 0);
+            lv_obj_set_style_border_width(b, 0, 0);
+            lv_obj_add_event_cb(b, on_program_tap, LV_EVENT_CLICKED,
+                                (void *)(intptr_t)i);
+            lv_obj_t * bl = lv_label_create(b);
+            lv_label_set_text(bl, names[i]);
+            lv_obj_set_style_text_color(bl, lv_color_hex(0xffffff), 0);
+            lv_obj_set_style_text_font(bl, &lv_font_montserrat_18, 0);
+            lv_obj_center(bl);
+            btn_prog[i] = b;
+        }
+    }
 
     /* Environment readings live in the left column just above the
        setpoint row, where "Boiler idle" used to sit. Boiler state has

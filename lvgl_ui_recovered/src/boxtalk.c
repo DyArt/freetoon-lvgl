@@ -739,7 +739,11 @@ static void* http_poll_thread(void* arg) {
          * protocol's intended path for query-only state-vars. A query is one
          * small XML round-trip; not the same as HTTP polling. */
         boxtalk_request_indoor_refresh();
-        sleep(15);
+        /* 3 s — used to be 15 s, but that was the source of "the flame icon
+         * lights up half a minute after the boiler kicks in" complaints.
+         * burner_on / dhw_on / active_state / setpoint all ride this poll;
+         * happ_thermstat is the local loopback so the cost is negligible. */
+        sleep(3);
     }
     return NULL;
 }

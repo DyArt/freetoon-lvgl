@@ -28,12 +28,14 @@ static lv_obj_t * day_list;       /* parent of switch-point rows */
 static lv_timer_t * refresh_timer = NULL;
 
 /* Layout constants — VERTICAL orientation: one column per weekday, time
- * runs top→bottom (00:00 at top, 24:00 at bottom). Reads like a planner. */
+ * runs top→bottom (00:00 at top, 24:00 at bottom). Reads like a planner.
+ * Compressed so the timeline + day chips + per-day switch list fit a
+ * 600-px-tall screen without overlapping. */
 #define TL_X        80
-#define TL_Y        140
+#define TL_Y        130
 #define TL_COL_W    120                /* width of each weekday column   */
-#define TL_HOUR_PX  18                 /* vertical pixels per hour        */
-#define TL_H        (24 * TL_HOUR_PX)  /* total height = 432 px           */
+#define TL_HOUR_PX  12                 /* vertical pixels per hour        */
+#define TL_H        (24 * TL_HOUR_PX)  /* total height = 288 px           */
 #define TL_W        (7  * TL_COL_W)    /* total width  = 840 px           */
 
 /* Forward decls */
@@ -67,16 +69,8 @@ static void rebuild_timeline(void) {
     lv_obj_clean(timeline_box);
     timeline_now_line = NULL;
 
-    /* Day-of-week column headers across the top inside the timeline box. */
-    for (int d = 0; d < 7; d++) {
-        lv_obj_t * h = lv_label_create(timeline_box);
-        lv_label_set_text(h, schedule_day_short(d));
-        lv_obj_set_style_text_color(h, lv_color_hex(0x88aabb), 0);
-        lv_obj_set_style_text_font(h, &lv_font_montserrat_18, 0);
-        lv_obj_set_width(h, TL_COL_W);
-        lv_obj_set_style_text_align(h, LV_TEXT_ALIGN_CENTER, 0);
-        lv_obj_set_pos(h, d * TL_COL_W, -28);
-    }
+    /* (Day-of-week column headers come from the chips row above the
+     * timeline — no need to duplicate them inside the box.) */
 
     /* Horizontal hour gridlines every 6 hours, spanning all 7 day columns. */
     for (int hr = 0; hr <= 24; hr += 6) {
@@ -525,8 +519,8 @@ lv_obj_t * screen_schedule_create(void) {
     /* Day chips */
     for (int i = 0; i < 7; i++) {
         lv_obj_t * c = lv_obj_create(scr_root);
-        lv_obj_set_size(c, 130, 56);
-        lv_obj_set_pos(c, 30 + i * 140, 100);
+        lv_obj_set_size(c, 130, 48);
+        lv_obj_set_pos(c, 30 + i * 140, 70);
         lv_obj_set_style_radius(c, 12, 0);
         lv_obj_set_style_pad_all(c, 0, 0);
         lv_obj_clear_flag(c, LV_OBJ_FLAG_SCROLLABLE);
@@ -553,10 +547,10 @@ lv_obj_t * screen_schedule_create(void) {
     lv_obj_set_style_pad_all(timeline_box, 8, 0);
     lv_obj_clear_flag(timeline_box, LV_OBJ_FLAG_SCROLLABLE);
 
-    /* Day-list container below the timeline */
+    /* Day-list container below the timeline (now shorter to fit) */
     day_list = lv_obj_create(scr_root);
-    lv_obj_set_size(day_list, 960, 230);
-    lv_obj_set_pos(day_list, 30, 360);
+    lv_obj_set_size(day_list, 960, 160);
+    lv_obj_set_pos(day_list, 30, 432);
     lv_obj_set_style_bg_opa(day_list, LV_OPA_TRANSP, 0);
     lv_obj_set_style_border_width(day_list, 0, 0);
     lv_obj_set_style_pad_all(day_list, 0, 0);

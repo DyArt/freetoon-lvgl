@@ -99,31 +99,50 @@ static void chart_draw_x_label(lv_event_t * e) {
     dsc->text[0] = 0;
 }
 
-/* Per-period: which logger + rra to use, and whether to diff-aggregate.
-   Returns 0 if loaded. */
+/* Per-period: which logger + rra + how many samples to fetch.
+ *
+ * Critical: each tab's `samples=` must match the visible window —
+ * `5yrhours` archives go back 5 years (8760 samples × 5 ≈ 43800
+ * buckets) so a default samples=512 would return ~21 days for the
+ * Week tab. Match the archive bucket size to the tab's nominal
+ * window so the chart actually shows what its tab label promises.
+ *
+ *   Hour   1 h /  5 min   → 12 samples
+ *   Day    24 h / 5 min   → 288
+ *   Week   7 d /  1 h     → 168
+ *   Month  31 d / 1 d     → 31
+ *   Year   365 d / 1 d    → 365
+ * Returns 0 if loaded. */
 static int load_for_period(void) {
     const metric_t * m = &metrics[selected_metric];
     switch (selected_period) {
         case PERIOD_HOUR:
+            return stats_fetch(m->flow_logger, "5min", 12, &series);
         case PERIOD_DAY:
-            return stats_fetch(m->flow_logger, "5min", &series);
+            return stats_fetch(m->flow_logger, "5min", 288, &series);
         case PERIOD_WEEK:
-            /* Cumulative meter, hourly samples — chart shows raw cumulative.
-               TODO: diff adjacent samples for "per-hour usage". */
+            /* Cumulative meter, hourly samples — diff'd to per-hour usage
+             * in render_chart. 168 hours = 7 days exactly. */
             if (m->cum_logger_extra) {
-                stats_fetch(m->cum_logger_extra, "5yrhours", &series2);
+                stats_fetch(m->cum_logger_extra, "5yrhours", 168, &series2);
             } else {
                 series2.n = 0;
             }
-            return stats_fetch(m->cum_logger, "5yrhours", &series);
+            return stats_fetch(m->cum_logger, "5yrhours", 168, &series);
         case PERIOD_MONTH:
+            if (m->cum_logger_extra) {
+                stats_fetch(m->cum_logger_extra, "10yrdays", 31, &series2);
+            } else {
+                series2.n = 0;
+            }
+            return stats_fetch(m->cum_logger, "10yrdays", 31, &series);
         case PERIOD_YEAR:
             if (m->cum_logger_extra) {
-                stats_fetch(m->cum_logger_extra, "10yrdays", &series2);
+                stats_fetch(m->cum_logger_extra, "10yrdays", 365, &series2);
             } else {
                 series2.n = 0;
             }
-            return stats_fetch(m->cum_logger, "10yrdays", &series);
+            return stats_fetch(m->cum_logger, "10yrdays", 365, &series);
     }
     return -1;
 }

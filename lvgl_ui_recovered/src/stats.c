@@ -37,19 +37,23 @@ static int http_get_body(const char * path_qs, char * out, size_t outsz) {
     return 0;
 }
 
-int stats_fetch(const char * logger_name, const char * rra, stats_series_t * series) {
+int stats_fetch(const char * logger_name, const char * rra, int max_samples,
+                stats_series_t * series) {
     series->n = 0;
     series->min = +1e30; series->max = -1e30;
+    if (max_samples <= 0 || max_samples > STATS_MAX_SAMPLES)
+        max_samples = STATS_MAX_SAMPLES;
     char qs[256];
     /* `samples=N` caps the response to the most-recent N entries — the
      * default 5min/5yrhours/10yrdays archives are 512 buckets, mostly
      * null, and the full JSON dumps weigh ~250 KB which used to
      * overflow our 64-KB receive buffer and clip off the recent data.
-     * Cap at STATS_MAX_SAMPLES so the chart still has all the points
-     * it can render. */
+     * Per-period N (passed in) bounds the chart window to the right
+     * timespan — without this, every tab fetched 512 samples regardless
+     * of RRA granularity, so the "Week" tab actually showed ~21 days. */
     snprintf(qs, sizeof(qs),
         "hcb_rrd?action=getRrdData&loggerName=%s&rra=%s&readableTime=1&nullForNaN=1&samples=%d",
-        logger_name, rra, STATS_MAX_SAMPLES);
+        logger_name, rra, max_samples);
     static char body[256 * 1024];
     if (http_get_body(qs, body, sizeof(body)) != 0) return -1;
 
@@ -64,7 +68,7 @@ int stats_fetch(const char * logger_name, const char * rra, stats_series_t * ser
     }
 
     /* Walk the JSON: find each "DD-MM-YYYY HH:MM:SS": <value-or-null> pair. */
-    while (series->n < STATS_MAX_SAMPLES) {
+    while (series->n < max_samples) {
         char * key_start = strchr(p, '"');
         if (!key_start) break;
         char * key_end = strchr(key_start + 1, '"');
@@ -123,6 +127,6 @@ int stats_fetch(const char * logger_name, const char * rra, stats_series_t * ser
     return 0;
 }
 
-int stats_elec_flow_5min(stats_series_t * out)  { return stats_fetch("elec_flow",  "5min", out); }
-int stats_gas_flow_5min(stats_series_t * out)   { return stats_fetch("gas_flow",   "5min", out); }
-int stats_water_flow_5min(stats_series_t * out) { return stats_fetch("water_flow", "5min", out); }
+int stats_elec_flow_5min(stats_series_t * out)  { return stats_fetch("elec_flow",  "5min", STATS_MAX_SAMPLES, out); }
+int stats_gas_flow_5min(stats_series_t * out)   { return stats_fetch("gas_flow",   "5min", STATS_MAX_SAMPLES, out); }
+int stats_water_flow_5min(stats_series_t * out) { return stats_fetch("water_flow", "5min", STATS_MAX_SAMPLES, out); }

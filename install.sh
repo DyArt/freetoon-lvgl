@@ -41,6 +41,7 @@ COMPANION_GATE="$(pick COMPANION_GATE "$HERE/companion_gate.sh" "$HERE/scripts/c
 INTEG_INSTALLER="$(pick INTEG_INSTALLER "$HERE/integrations-install.sh" "$HERE/scripts/integrations_install.sh")"
 TOONVNC_SH="$(pick TOONVNC_SH       "$HERE/toonvnc.sh"         "$HERE/toonvnc.sh")"
 OT_MODE_SH="$(pick OT_MODE_SH       "$HERE/ot_mode_switch.sh"  "$HERE/scripts/ot_mode_switch.sh")"
+QUBY_BRIDGE_BIN="$(pick QUBY_BRIDGE_BIN "$HERE/quby_bridge"        "$HERE/quby_bridge/quby_bridge")"
 FBVNC_INPUT="$(pick FBVNC_INPUT     "$HERE/fbvnc_input"        "$HERE/../qt_rebuild/fbvnc_input")"
 PWA_DIR="${PWA_DIR:-}"
 if [[ -z "$PWA_DIR" ]]; then
@@ -139,18 +140,29 @@ enable_ha=0
 CFG
 
     echo "[5/5] Wiring inittab + restart..."
-    # Drop legacy quby_bridge / p1bridge rows from earlier installs.
-    # 2026-05-19: keeping the bridge in the /dev/ttymxc0 path breaks happ↔BA
-    # framing and kills CV pressure. Default install no longer wires those
-    # bridges; users who really want the PWA boiler card can re-add them by
-    # hand. See project_quby_bridge_is_the_culprit_2026-05-19 in memory.
+    # Drop any legacy bridges first so ot_mode_switch.sh starts from a
+    # clean slate. We learned the hard way that starting the bridge while
+    # happ_thermstat is still holding a stale fd on /dev/ttymxc0 locks
+    # both into a "12 B / 0 fr" loop; ot_mode_switch.sh handles the
+    # umount+kick sequence properly, but only from a clean baseline.
     drop_row qbri
     drop_row p1br
     remote "pkill -x quby_bridge 2>/dev/null; pkill -x p1bridge 2>/dev/null; true"
-    # Drop any leftover bind-mount so happ_thermstat re-opens the real UART.
     remote "umount -l /dev/ttymxc0 2>/dev/null; true"
     upsert_row "$TOON_ROW"
     upsert_row "$VNCS_ROW"
+    # Now enable proxy mode via the official switcher — adds the qbri
+    # inittab row, kicks happ_thermstat, and waits for the rebind. This
+    # is what makes the PWA boiler card light up while keeping CV pressure
+    # live (verified 2026-05-19, project_quby_bridge_is_the_culprit_…).
+    if [[ -x "$QUBY_BRIDGE_BIN" ]]; then
+        echo "  → /mnt/data/quby_bridge"
+        $SCP "$QUBY_BRIDGE_BIN" "$TOON_USER@$TOON_HOST:/mnt/data/quby_bridge.new"
+        remote "mv -f /mnt/data/quby_bridge.new /mnt/data/quby_bridge && chmod +x /mnt/data/quby_bridge"
+        remote "/mnt/data/ot_mode_switch.sh proxy" || true
+    else
+        echo "  (skipping bridge install — $QUBY_BRIDGE_BIN absent; OT bridge stays off)"
+    fi
     # Stop the running UI / VNC so init respawns through the new launcher.
     remote "pkill -9 -x toonui 2>/dev/null; pkill -9 -x x11vnc 2>/dev/null; true"
     remote "kill -HUP 1"

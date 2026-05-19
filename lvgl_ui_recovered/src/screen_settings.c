@@ -733,6 +733,14 @@ static void on_uimode_to_qtgui(lv_event_t * e) {
     lv_obj_center(b_yes_l);
 }
 
+/* Marketplace tile-tap: push the marketplace browser screen onto the
+ * navigation stack. The browser does its own HTTP fetch in a background
+ * thread, so this returns immediately. */
+static void open_marketplace(lv_event_t * e) {
+    (void)e;
+    ui_push(screen_marketplace_create());
+}
+
 static void open_uimode_modal(lv_event_t * e) {
     (void)e;
     lv_obj_t * p = modal_open("UI mode", 440);
@@ -1890,6 +1898,8 @@ lv_obj_t * screen_settings_create(void) {
               "P1 / water / vent / HA", open_integrations_modal);
     make_tile(x0 + 1*(308+gap), row4, NULL, LV_SYMBOL_POWER, "UI mode",
               "freetoon vs stock qt-gui", open_uimode_modal);
+    make_tile(x0 + 2*(308+gap), row4, NULL, LV_SYMBOL_DOWNLOAD, "Marketplace",
+              "browse + install integrations", open_marketplace);
 
     return scr_root;
 }

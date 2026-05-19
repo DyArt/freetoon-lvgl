@@ -38,6 +38,7 @@ pick() {
 TOONUI_BIN="$(pick TOONUI_BIN       "$HERE/toonui"             "$HERE/lvgl_ui_recovered/build/toonui")"
 UI_LAUNCHER="$(pick UI_LAUNCHER     "$HERE/ui_launcher.sh"     "$HERE/scripts/ui_launcher.sh")"
 COMPANION_GATE="$(pick COMPANION_GATE "$HERE/companion_gate.sh" "$HERE/scripts/companion_gate.sh")"
+INTEG_INSTALLER="$(pick INTEG_INSTALLER "$HERE/integrations-install.sh" "$HERE/scripts/integrations_install.sh")"
 TOONVNC_SH="$(pick TOONVNC_SH       "$HERE/toonvnc.sh"         "$HERE/toonvnc.sh")"
 OT_MODE_SH="$(pick OT_MODE_SH       "$HERE/ot_mode_switch.sh"  "$HERE/scripts/ot_mode_switch.sh")"
 FBVNC_INPUT="$(pick FBVNC_INPUT     "$HERE/fbvnc_input"        "$HERE/../qt_rebuild/fbvnc_input")"
@@ -106,6 +107,7 @@ do_install() {
     push "$TOONUI_BIN"     /mnt/data/toonui
     push "$UI_LAUNCHER"    /mnt/data/ui_launcher.sh
     push "$COMPANION_GATE" /mnt/data/companion_gate.sh
+    push "$INTEG_INSTALLER" /mnt/data/integrations-install.sh
     push "$TOONVNC_SH"     /mnt/data/toonvnc.sh
     push "$OT_MODE_SH"     /mnt/data/ot_mode_switch.sh
     [[ -x "$FBVNC_INPUT" ]] && push "$FBVNC_INPUT" /mnt/data/fbvnc_input

@@ -6,6 +6,7 @@
 #include "screens.h"
 #include "homeassistant.h"
 #include "icons.h"
+#include "settings.h"
 #include <stdio.h>
 #include <string.h>
 
@@ -29,6 +30,9 @@ typedef struct {
 
 static lv_obj_t   * scr_root = NULL;
 static light_row_t  rows[HA_LIGHT_COUNT];
+/* Full-page "HA offline" overlay shown when settings.enable_ha is 0.
+ * Toggled by refresh_cb so live changes apply without rebuilding. */
+static lv_obj_t   * ha_offline_overlay = NULL;
 static lv_timer_t * refresh_timer = NULL;
 
 /* ui_pop deferred via lv_async_call — calling it directly from inside an
@@ -58,6 +62,16 @@ static void on_light_toggle(lv_event_t * e) {
 
 static void refresh_cb(lv_timer_t * t) {
     (void)t;
+    /* HA integration off → don't bother painting N "offline" rows; show
+     * one big "HA offline" overlay instead. Toggled live so the user can
+     * flip the integration in Settings and see the page change without
+     * re-entering it. */
+    if (ha_offline_overlay) {
+        if (settings.enable_ha)
+            lv_obj_add_flag(ha_offline_overlay, LV_OBJ_FLAG_HIDDEN);
+        else
+            lv_obj_clear_flag(ha_offline_overlay, LV_OBJ_FLAG_HIDDEN);
+    }
     for (int i = 0; i < HA_LIGHT_COUNT; i++) {
         if (!rows[i].lbl_state) continue;
         if (!ha_lights[i].available) {
@@ -230,6 +244,51 @@ lv_obj_t * screen_lights_create(void) {
     build_area_card(0, "Woonkamer");
     build_area_card(1, "Keuken");
     build_area_card(2, "Boven");
+
+    /* HA-offline overlay — sits ON TOP of the area cards + master strip
+     * so they vanish behind it when HA integration is off. The area
+     * cards stay built (cheap), the overlay just covers them. */
+    ha_offline_overlay = lv_obj_create(scr_root);
+    lv_obj_set_size(ha_offline_overlay, 1024, 600);
+    lv_obj_set_pos(ha_offline_overlay, 0, 0);
+    lv_obj_set_style_bg_color(ha_offline_overlay, lv_color_hex(COL_BG), 0);
+    lv_obj_set_style_bg_opa(ha_offline_overlay, LV_OPA_COVER, 0);
+    lv_obj_set_style_border_width(ha_offline_overlay, 0, 0);
+    lv_obj_clear_flag(ha_offline_overlay, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_add_flag(ha_offline_overlay, LV_OBJ_FLAG_CLICKABLE);   /* swallow taps */
+    {
+        lv_obj_t * back = lv_btn_create(ha_offline_overlay);
+        lv_obj_set_size(back, 140, 52);
+        lv_obj_align(back, LV_ALIGN_TOP_LEFT, 24, 20);
+        lv_obj_set_style_bg_color(back, lv_color_hex(0x3a4658), 0);
+        lv_obj_set_style_radius(back, 8, 0);
+        lv_obj_set_ext_click_area(back, 20);
+        lv_obj_add_event_cb(back, on_back, LV_EVENT_CLICKED, NULL);
+        lv_obj_t * bl = lv_label_create(back);
+        lv_obj_set_style_text_color(bl, lv_color_hex(0xffffff), 0);
+        lv_obj_set_style_text_font(bl, &lv_font_montserrat_22, 0);
+        lv_label_set_text(bl, "< Back");
+        lv_obj_center(bl);
+
+        lv_obj_t * big = lv_label_create(ha_offline_overlay);
+        lv_obj_set_style_text_color(big, lv_color_hex(COL_TEXT_HI), 0);
+        lv_obj_set_style_text_font(big, &lv_font_montserrat_28, 0);
+        lv_label_set_text(big, "HA offline");
+        lv_obj_align(big, LV_ALIGN_CENTER, 0, -30);
+
+        lv_obj_t * hint = lv_label_create(ha_offline_overlay);
+        lv_obj_set_style_text_color(hint, lv_color_hex(COL_TEXT_DIM), 0);
+        lv_obj_set_style_text_font(hint, &lv_font_montserrat_22, 0);
+        lv_obj_set_width(hint, 800);
+        lv_label_set_long_mode(hint, LV_LABEL_LONG_WRAP);
+        lv_obj_set_style_text_align(hint, LV_TEXT_ALIGN_CENTER, 0);
+        lv_label_set_text(hint,
+            "Home Assistant integration is disabled.\n"
+            "Enable it in Settings  >  Integrations to control lights from here.");
+        lv_obj_align(hint, LV_ALIGN_CENTER, 0, 40);
+    }
+    /* Hidden by default; refresh_cb flips it on if enable_ha=0. */
+    lv_obj_add_flag(ha_offline_overlay, LV_OBJ_FLAG_HIDDEN);
 
     refresh_timer = lv_timer_create(refresh_cb, 1000, NULL);
     refresh_cb(refresh_timer);

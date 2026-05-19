@@ -110,16 +110,16 @@ static void refresh_cb(lv_timer_t * t) {
     /* Always paint values: if data not yet present, fall back to a
        "wait..." marker instead of leaving the stale "-- C" default. */
     if (toon_state.indoor_temp > 0)
-        lv_label_set_text_fmt(lbl_temp, "%.1f C", display_indoor_temp(toon_state.indoor_temp));
+        lv_label_set_text_fmt(lbl_temp, "%.1f°C", display_indoor_temp(toon_state.indoor_temp));
     else
         lv_label_set_text(lbl_temp, "...");
     /* Setpoint visible at all times; "to" prefix only when the boiler is
      * actively heating toward it (see screen_home.c for the same idea). */
     if (toon_state.setpoint > 0) {
         if (toon_state.burner_on)
-            lv_label_set_text_fmt(lbl_setpoint, "to %.1f C", toon_state.setpoint);
+            lv_label_set_text_fmt(lbl_setpoint, "to %.1f°C", toon_state.setpoint);
         else
-            lv_label_set_text_fmt(lbl_setpoint, "%.1f C", toon_state.setpoint);
+            lv_label_set_text_fmt(lbl_setpoint, "%.1f°C", toon_state.setpoint);
     } else {
         lv_label_set_text(lbl_setpoint, "");
     }
@@ -248,7 +248,7 @@ static void refresh_cb(lv_timer_t * t) {
         if (settings.show_dim_weather && weather_state.connected) {
             const char * city = settings.weather_location[0]
                                 ? settings.weather_location : "Forecast";
-            lv_label_set_text_fmt(dim_lbl_city, "%s  -  %.1f C now",
+            lv_label_set_text_fmt(dim_lbl_city, "%s  -  %.1f°C now",
                                   city, weather_state.current_temp);
             lv_obj_clear_flag(dim_lbl_city, LV_OBJ_FLAG_HIDDEN);
         } else {
@@ -300,10 +300,10 @@ static void refresh_cb(lv_timer_t * t) {
                     lv_color_hex(weather_icon_color_for(h->icon)), 0);
                 lv_label_set_text(dim_fc_day[i], h->label);
                 if (h->wind_dir[0])
-                    lv_label_set_text_fmt(dim_fc_temp[i], "%.0f C  %s%d",
+                    lv_label_set_text_fmt(dim_fc_temp[i], "%.0f°C  %s%d",
                                           h->temperature, h->wind_dir, h->wind_bft);
                 else
-                    lv_label_set_text_fmt(dim_fc_temp[i], "%.0f C",
+                    lv_label_set_text_fmt(dim_fc_temp[i], "%.0f°C",
                                           h->temperature);
                 painted = 1;
             } else {
@@ -320,7 +320,7 @@ static void refresh_cb(lv_timer_t * t) {
                                               d->min_temp, d->max_temp,
                                               d->wind_dir, d->wind_bft);
                     else
-                        lv_label_set_text_fmt(dim_fc_temp[i], "%.0f/%.0f C",
+                        lv_label_set_text_fmt(dim_fc_temp[i], "%.0f/%.0f°C",
                                               d->min_temp, d->max_temp);
                     painted = 1;
                 }
@@ -336,7 +336,7 @@ static void refresh_cb(lv_timer_t * t) {
                                       d->min_temp, d->max_temp,
                                       d->wind_dir, d->wind_bft);
             else
-                lv_label_set_text_fmt(dim_fc_temp[i], "%.0f/%.0f C",
+                lv_label_set_text_fmt(dim_fc_temp[i], "%.0f/%.0f°C",
                                       d->min_temp, d->max_temp);
             painted = 1;
         }
@@ -352,7 +352,7 @@ static void refresh_cb(lv_timer_t * t) {
     }
     if (lbl_outside) {
         if (settings.show_dim_weather && weather_state.connected) {
-            lv_label_set_text_fmt(lbl_outside, "%.1f C", weather_state.current_temp);
+            lv_label_set_text_fmt(lbl_outside, "%.1f°C", weather_state.current_temp);
             lv_obj_clear_flag(lbl_outside, LV_OBJ_FLAG_HIDDEN);
         } else {
             lv_obj_add_flag(lbl_outside, LV_OBJ_FLAG_HIDDEN);

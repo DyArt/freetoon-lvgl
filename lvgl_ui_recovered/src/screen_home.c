@@ -94,6 +94,32 @@ static lv_obj_t * fc_day_lbl[WEATHER_FORECAST_DAYS];
 static lv_obj_t * fc_temp_lbl[WEATHER_FORECAST_DAYS];
 static lv_obj_t * fc_wind_lbl[WEATHER_FORECAST_DAYS];
 static lv_obj_t * fc_icon[WEATHER_FORECAST_DAYS];
+/* Bicolor partly-cloudy overlay — yellow sun layered on top of the
+ * white cloud for 'b'/'j' Buienradar codes. Hidden for all other codes;
+ * set_forecast_icon() manages visibility + src + recolor. */
+static lv_obj_t * fc_icon_sun[WEATHER_FORECAST_DAYS];
+
+static void set_forecast_icon(lv_obj_t * cloud, lv_obj_t * sun,
+                              const char * letter) {
+    if (!cloud) return;
+    int is_partly = letter && (letter[0] == 'b' || letter[0] == 'j');
+    if (is_partly) {
+        lv_img_set_src(cloud, weather_icon_for("d"));            /* plain cloud */
+        lv_obj_set_style_img_recolor(cloud, lv_color_hex(0xf0f4f8), 0);
+        if (sun) {
+            lv_img_set_src(sun, weather_icon_for("a"));          /* plain sun */
+            lv_obj_set_style_img_recolor(sun, lv_color_hex(0xffd24a), 0);
+            lv_obj_set_style_img_recolor_opa(sun, 255, 0);
+            lv_obj_clear_flag(sun, LV_OBJ_FLAG_HIDDEN);
+        }
+    } else {
+        lv_img_set_src(cloud, weather_icon_for(letter));
+        lv_obj_set_style_img_recolor(cloud,
+            lv_color_hex(weather_icon_color_for(letter)), 0);
+        if (sun) lv_obj_add_flag(sun, LV_OBJ_FLAG_HIDDEN);
+    }
+}
+
 static lv_obj_t * water_spinner;
 static lv_obj_t * forecast_box;
 static lv_obj_t * lbl_forecast_city = NULL;
@@ -464,15 +490,15 @@ static void refresh_cb(lv_timer_t * t) {
     }
 
     if (toon_state.indoor_temp > 0)
-        lv_label_set_text_fmt(lbl_t_temp, "%.1f C", display_indoor_temp(toon_state.indoor_temp));
+        lv_label_set_text_fmt(lbl_t_temp, "%.1f°C", display_indoor_temp(toon_state.indoor_temp));
     /* Setpoint visible at all times; the "to" prefix only when the CH
      * burner is actively heating toward it (idle just shows the target
      * temperature, no arrow). */
     if (toon_state.setpoint > 0) {
         if (toon_state.burner_on)
-            lv_label_set_text_fmt(lbl_t_setpoint, "to %.1f C", toon_state.setpoint);
+            lv_label_set_text_fmt(lbl_t_setpoint, "to %.1f°C", toon_state.setpoint);
         else
-            lv_label_set_text_fmt(lbl_t_setpoint, "%.1f C", toon_state.setpoint);
+            lv_label_set_text_fmt(lbl_t_setpoint, "%.1f°C", toon_state.setpoint);
     } else {
         lv_label_set_text(lbl_t_setpoint, "");
     }
@@ -861,7 +887,7 @@ static void refresh_cb(lv_timer_t * t) {
     /* Outside tile — current temp + short description. */
     if (lbl_outside_main) {
         if (weather_state.connected)
-            lv_label_set_text_fmt(lbl_outside_main, "%.1f C", weather_state.current_temp);
+            lv_label_set_text_fmt(lbl_outside_main, "%.1f°C", weather_state.current_temp);
         else
             lv_label_set_text(lbl_outside_main, "-- C");
     }
@@ -882,9 +908,7 @@ static void refresh_cb(lv_timer_t * t) {
                 lv_label_set_text(fc_day_lbl[i], h->label);
                 lv_label_set_text_fmt(fc_temp_lbl[i], "%.0f\xc2\xb0",
                                       h->temperature);
-                lv_img_set_src(fc_icon[i], weather_icon_for(h->icon));
-                lv_obj_set_style_img_recolor(fc_icon[i],
-                    lv_color_hex(weather_icon_color_for(h->icon)), 0);
+                set_forecast_icon(fc_icon[i], fc_icon_sun[i], h->icon);
                 if (h->wind_dir[0]) {
                     lv_label_set_text_fmt(fc_wind_lbl[i], "%s %d Bft",
                                           h->wind_dir, h->wind_bft);
@@ -918,9 +942,7 @@ static void refresh_cb(lv_timer_t * t) {
                 lv_label_set_text_fmt(fc_temp_lbl[i],
                                       "%.0f\xc2\xb0 (%.0f\xc2\xb0)",
                                       d->max_temp, d->min_temp);
-                lv_img_set_src(fc_icon[i], weather_icon_for(d->icon));
-                lv_obj_set_style_img_recolor(fc_icon[i],
-                    lv_color_hex(weather_icon_color_for(d->icon)), 0);
+                set_forecast_icon(fc_icon[i], fc_icon_sun[i], d->icon);
                 if (d->wind_dir[0]) {
                     lv_label_set_text_fmt(fc_wind_lbl[i], "%s %d Bft",
                                           d->wind_dir, d->wind_bft);
@@ -946,9 +968,7 @@ static void refresh_cb(lv_timer_t * t) {
             lv_label_set_text_fmt(fc_temp_lbl[i],
                                   "%.0f\xc2\xb0 (%.0f\xc2\xb0)",
                                   d->max_temp, d->min_temp);
-            lv_img_set_src(fc_icon[i], weather_icon_for(d->icon));
-            lv_obj_set_style_img_recolor(fc_icon[i],
-                lv_color_hex(weather_icon_color_for(d->icon)), 0);
+            set_forecast_icon(fc_icon[i], fc_icon_sun[i], d->icon);
             if (d->wind_dir[0]) {
                 lv_label_set_text_fmt(fc_wind_lbl[i], "%s %d Bft",
                                       d->wind_dir, d->wind_bft);
@@ -974,7 +994,7 @@ static void refresh_cb(lv_timer_t * t) {
 
     /* Outside tile — current temp + short description on second line. */
     if (lbl_outside_main && weather_state.connected) {
-        lv_label_set_text_fmt(lbl_outside_main, "%.1f C",
+        lv_label_set_text_fmt(lbl_outside_main, "%.1f°C",
                               weather_state.current_temp);
     }
     /* "Medemblik - 14.7 C now" header above the forecast strip. Life360
@@ -982,7 +1002,7 @@ static void refresh_cb(lv_timer_t * t) {
     if (lbl_forecast_city) {
         const char * city = settings.weather_location[0] ? settings.weather_location : "Forecast";
         if (weather_state.connected)
-            lv_label_set_text_fmt(lbl_forecast_city, "%s  -  %.1f C now",
+            lv_label_set_text_fmt(lbl_forecast_city, "%s  -  %.1f°C now",
                                   city, weather_state.current_temp);
         else
             lv_label_set_text(lbl_forecast_city, city);
@@ -1109,7 +1129,7 @@ static void refresh_cb(lv_timer_t * t) {
     /* Outside tile — current temp + short description. */
     if (lbl_outside_main) {
         if (weather_state.connected)
-            lv_label_set_text_fmt(lbl_outside_main, "%.1f C", weather_state.current_temp);
+            lv_label_set_text_fmt(lbl_outside_main, "%.1f°C", weather_state.current_temp);
         else
             lv_label_set_text(lbl_outside_main, "-- C");
     }
@@ -1124,9 +1144,7 @@ static void refresh_cb(lv_timer_t * t) {
             lv_label_set_text_fmt(fc_temp_lbl[i],
                                   "%.0f\xc2\xb0 (%.0f\xc2\xb0)",
                                   d->max_temp, d->min_temp);
-            lv_img_set_src(fc_icon[i], weather_icon_for(d->icon));
-            lv_obj_set_style_img_recolor(fc_icon[i],
-                lv_color_hex(weather_icon_color_for(d->icon)), 0);
+            set_forecast_icon(fc_icon[i], fc_icon_sun[i], d->icon);
             if (d->wind_dir[0])
                 lv_label_set_text_fmt(fc_wind_lbl[i], "%s %d Bft",
                                       d->wind_dir, d->wind_bft);
@@ -1813,6 +1831,21 @@ lv_obj_t * screen_home_create(void) {
             lv_img_set_src(fc_icon[i], weather_icon_for_lg("d"));   /* default cloud */
             lv_obj_align(fc_icon[i], LV_ALIGN_CENTER, 0, 8);
             lv_obj_add_flag(fc_icon[i], LV_OBJ_FLAG_EVENT_BUBBLE);
+
+            /* Sun overlay for 'b'/'j' partly-cloudy codes — small,
+             * top-left of the cloud so it reads as "sun peeking from
+             * behind a cloud". Hidden by default; set_forecast_icon()
+             * toggles visibility per refresh. */
+            fc_icon_sun[i] = lv_img_create(col);
+            lv_img_set_src(fc_icon_sun[i], weather_icon_for("a"));
+            lv_img_set_zoom(fc_icon_sun[i], 180);   /* 70 % of cloud size */
+            lv_obj_set_style_img_recolor(fc_icon_sun[i],
+                                         lv_color_hex(0xffd24a), 0);
+            lv_obj_set_style_img_recolor_opa(fc_icon_sun[i], 255, 0);
+            lv_obj_align_to(fc_icon_sun[i], fc_icon[i], LV_ALIGN_TOP_LEFT,
+                            -8, -8);
+            lv_obj_add_flag(fc_icon_sun[i], LV_OBJ_FLAG_HIDDEN);
+            lv_obj_add_flag(fc_icon_sun[i], LV_OBJ_FLAG_EVENT_BUBBLE);
 
             fc_wind_lbl[i] = lv_label_create(col);
             lv_obj_set_style_text_color(fc_wind_lbl[i], lv_color_hex(COL_TEXT_DIM), 0);

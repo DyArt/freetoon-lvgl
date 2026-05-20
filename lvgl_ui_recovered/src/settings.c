@@ -160,6 +160,7 @@ void settings_load(void) {
         else if (strcmp(k, "enable_p1_water") == 0) { settings.enable_p1_water = iv; seen_p1_water = 1; }
         else if (strcmp(k, "enable_vent")     == 0) { settings.enable_vent     = iv; seen_vent     = 1; }
         else if (strcmp(k, "enable_ha")       == 0) { settings.enable_ha       = iv; seen_ha       = 1; }
+        else if (strcmp(k, "enable_zwave")    == 0) settings.enable_zwave = iv;
         else if (strcmp(k, "boot_picker_enabled") == 0) settings.boot_picker_enabled = iv;
         else if (strcmp(k, "hide_offline_tiles")  == 0) settings.hide_offline_tiles = iv;
         else if (strcmp(k, "update_check_enabled") == 0) settings.update_check_enabled = iv;
@@ -265,6 +266,7 @@ void settings_save(void) {
     fprintf(f, "enable_p1_water=%d\n", settings.enable_p1_water);
     fprintf(f, "enable_vent=%d\n",     settings.enable_vent);
     fprintf(f, "enable_ha=%d\n",       settings.enable_ha);
+    fprintf(f, "enable_zwave=%d\n",    settings.enable_zwave);
     fprintf(f, "boot_picker_enabled=%d\n", settings.boot_picker_enabled);
     fprintf(f, "hide_offline_tiles=%d\n",  settings.hide_offline_tiles);
     fprintf(f, "update_check_enabled=%d\n", settings.update_check_enabled);

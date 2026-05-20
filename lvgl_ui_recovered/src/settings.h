@@ -68,6 +68,14 @@ typedef struct {
     int enable_vent;
     int enable_ha;
 
+    /* Z-Wave control — gates the Settings → Z-Wave management screen's
+     * write actions (include/exclude/on-off/rename). Default 0. Flipping it
+     * on also writes <supportControl>1</supportControl> into the stock
+     * config_hdrv_zwave.xml and restarts hdrv_zwave so the built-in
+     * controller's advanced control is genuinely enabled. See
+     * reference_toon_zwave_api memory for the HTTP API. */
+    int enable_zwave;
+
     /* Boot-picker — when 1, the launcher-spawned `toonui --bootpick`
      * shows a 10 s "freetoon vs stock qt-gui" picker before dispatching.
      * When 0 the picker short-circuits and the launcher boots straight

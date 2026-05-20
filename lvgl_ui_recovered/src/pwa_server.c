@@ -21,6 +21,7 @@
 #include "boxtalk.h"
 #include "homeassistant.h"
 #include "schedule.h"
+#include "settings.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -724,6 +725,147 @@ static int handle_curtain(int fd, const char * body) {
     return send_status(fd, 200, "OK", "{\"ok\":1}");
 }
 
+/* -------- full settings page (web mirror of Settings screen) ---------- */
+static int extract_int(const char * body, const char * key, int * out) {
+    float v;
+    if (!extract_float(body, key, &v)) return 0;
+    *out = (int)v;
+    return 1;
+}
+
+static int handle_settings_get(int fd) {
+    char body[2048];
+    int n = snprintf(body, sizeof body,
+        "{"
+        "\"auto_dim_enabled\":%d,\"auto_dim_seconds\":%d,"
+        "\"active_brightness\":%d,\"dim_brightness\":%d,"
+        "\"temp_offset_centi\":%d,\"show_dim_weather\":%d,"
+        "\"show_dim_waste\":%d,\"dim_waste_lead_days\":%d,"
+        "\"weather_location\":\"%s\",\"weather_location_id\":%d,"
+        "\"forecast_mode\":%d,\"ot_bridge_mode\":\"%s\",\"otgw_host\":\"%s\","
+        "\"mqtt_host\":\"%s\",\"mqtt_port\":%d,\"mqtt_user\":\"%s\","
+        "\"enable_p1_elec\":%d,\"enable_p1_water\":%d,\"enable_vent\":%d,"
+        "\"enable_ha\":%d,\"enable_zwave\":%d,\"vnc_enabled\":%d,"
+        "\"hide_offline_tiles\":%d,\"boot_picker_enabled\":%d,"
+        "\"update_check_enabled\":%d"
+        "}",
+        settings.auto_dim_enabled, settings.auto_dim_seconds,
+        settings.active_brightness, settings.dim_brightness,
+        settings.temp_offset_centi, settings.show_dim_weather,
+        settings.show_dim_waste, settings.dim_waste_lead_days,
+        settings.weather_location, settings.weather_location_id,
+        settings.forecast_mode, settings.ot_bridge_mode, settings.otgw_host,
+        settings.mqtt_host, settings.mqtt_port, settings.mqtt_user,
+        settings.enable_p1_elec, settings.enable_p1_water, settings.enable_vent,
+        settings.enable_ha, settings.enable_zwave, settings.vnc_enabled,
+        settings.hide_offline_tiles, settings.boot_picker_enabled,
+        settings.update_check_enabled);
+    char hdr[160];
+    int hn = snprintf(hdr, sizeof hdr,
+        "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n"
+        "Access-Control-Allow-Origin: *\r\nContent-Length: %d\r\n\r\n", n);
+    if (sock_send_all(fd, hdr, hn) < 0) return -1;
+    return sock_send_all(fd, body, n);
+}
+
+static int handle_settings_post(int fd, const char * body) {
+    int iv; char sv[64];
+    if (extract_int(body, "auto_dim_enabled", &iv))   settings.auto_dim_enabled = !!iv;
+    if (extract_int(body, "auto_dim_seconds", &iv))   settings.auto_dim_seconds = iv < 5 ? 5 : (iv > 300 ? 300 : iv);
+    if (extract_int(body, "active_brightness", &iv))  settings.active_brightness = iv < 0 ? 0 : (iv > 1000 ? 1000 : iv);
+    if (extract_int(body, "dim_brightness", &iv))     settings.dim_brightness = iv < 0 ? 0 : (iv > 1000 ? 1000 : iv);
+    if (extract_int(body, "temp_offset_centi", &iv))  settings.temp_offset_centi = iv < -500 ? -500 : (iv > 500 ? 500 : iv);
+    if (extract_int(body, "show_dim_weather", &iv))   settings.show_dim_weather = !!iv;
+    if (extract_int(body, "show_dim_waste", &iv))     settings.show_dim_waste = !!iv;
+    if (extract_int(body, "dim_waste_lead_days", &iv))settings.dim_waste_lead_days = iv < 0 ? 0 : (iv > 7 ? 7 : iv);
+    if (extract_int(body, "weather_location_id", &iv))settings.weather_location_id = iv;
+    if (extract_int(body, "forecast_mode", &iv))      settings.forecast_mode = iv;
+    if (extract_int(body, "mqtt_port", &iv))          settings.mqtt_port = iv;
+    if (extract_int(body, "enable_p1_elec", &iv))     settings.enable_p1_elec = !!iv;
+    if (extract_int(body, "enable_p1_water", &iv))    settings.enable_p1_water = !!iv;
+    if (extract_int(body, "enable_vent", &iv))        settings.enable_vent = !!iv;
+    if (extract_int(body, "enable_ha", &iv))          settings.enable_ha = !!iv;
+    if (extract_int(body, "enable_zwave", &iv))       settings.enable_zwave = !!iv;
+    if (extract_int(body, "vnc_enabled", &iv))        settings.vnc_enabled = !!iv;
+    if (extract_int(body, "hide_offline_tiles", &iv)) settings.hide_offline_tiles = !!iv;
+    if (extract_int(body, "boot_picker_enabled", &iv))settings.boot_picker_enabled = !!iv;
+    if (extract_int(body, "update_check_enabled", &iv))settings.update_check_enabled = !!iv;
+    if (extract_str(body, "weather_location", sv, sizeof sv))
+        snprintf(settings.weather_location, sizeof settings.weather_location, "%s", sv);
+    if (extract_str(body, "ot_bridge_mode", sv, sizeof sv))
+        snprintf(settings.ot_bridge_mode, sizeof settings.ot_bridge_mode, "%s", sv);
+    if (extract_str(body, "otgw_host", sv, sizeof sv))
+        snprintf(settings.otgw_host, sizeof settings.otgw_host, "%s", sv);
+    if (extract_str(body, "mqtt_host", sv, sizeof sv))
+        snprintf(settings.mqtt_host, sizeof settings.mqtt_host, "%s", sv);
+    if (extract_str(body, "mqtt_user", sv, sizeof sv))
+        snprintf(settings.mqtt_user, sizeof settings.mqtt_user, "%s", sv);
+    settings_save();
+    return send_status(fd, 200, "OK", "{\"ok\":1,\"note\":\"some changes apply after a toonui restart\"}");
+}
+
+static const char SETTINGS_HTML[] =
+"<!doctype html><html><head><meta charset=utf-8>"
+"<meta name=viewport content='width=device-width,initial-scale=1'>"
+"<title>freetoon settings</title><style>"
+"body{font-family:system-ui,sans-serif;background:#0e1a2a;color:#dfe9f3;margin:0;padding:16px}"
+"h1{font-size:20px}h2{font-size:15px;color:#88aabb;margin:18px 0 6px;border-bottom:1px solid #24385c;padding-bottom:4px}"
+".r{display:flex;align-items:center;justify-content:space-between;padding:8px 0;gap:12px}"
+".r label{flex:1}input,select{background:#1a2940;color:#fff;border:1px solid #2a4060;border-radius:8px;padding:8px;font-size:15px}"
+"input[type=text],input[type=number]{width:170px}input[type=checkbox]{width:24px;height:24px}"
+"button{background:#2e6e3a;color:#fff;border:0;border-radius:10px;padding:14px 22px;font-size:17px;margin-top:18px}"
+"#msg{color:#ffcc44;margin-left:12px}"
+"</style></head><body><h1>freetoon settings</h1><div id=f>loading...</div>"
+"<button onclick=save()>Save</button><span id=msg></span>"
+"<script>"
+"var S={};"
+"var SCHEMA=["
+"['Display','h'],"
+"['auto_dim_enabled','Auto-dim','b'],['auto_dim_seconds','Dim after (s)','n'],"
+"['active_brightness','Active brightness (0-1000)','n'],['dim_brightness','Dim brightness (0-1000)','n'],"
+"['temp_offset_centi','Temp offset (centi-C)','n'],"
+"['show_dim_weather','Weather on dim','b'],['show_dim_waste','Waste on dim','b'],"
+"['dim_waste_lead_days','Waste lead days (0-7)','n'],"
+"['Weather','h'],"
+"['weather_location','Location name','t'],['weather_location_id','Buienradar id','n'],"
+"['forecast_mode','Forecast (0 auto/1 hourly/2 daily)','n'],"
+"['Heating','h'],"
+"['ot_bridge_mode','OT bridge (off/proxy/wireless)','t'],['otgw_host','OTGW host','t'],"
+"['MQTT','h'],"
+"['mqtt_host','Broker host','t'],['mqtt_port','Port','n'],['mqtt_user','User','t'],"
+"['Integrations','h'],"
+"['enable_p1_elec','P1 electricity','b'],['enable_p1_water','P1 water','b'],"
+"['enable_vent','Ventilation','b'],['enable_ha','Home Assistant','b'],['enable_zwave','Z-Wave control','b'],"
+"['Display options','h'],"
+"['vnc_enabled','VNC server','b'],['hide_offline_tiles','Hide offline tiles','b'],"
+"['boot_picker_enabled','Boot picker','b'],['update_check_enabled','Update check','b']"
+"];"
+"function build(){var h='';for(var i=0;i<SCHEMA.length;i++){var s=SCHEMA[i];"
+"if(s[1]=='h'){h+='<h2>'+s[0]+'</h2>';continue;}var k=s[0],lbl=s[1],t=s[2],v=S[k];"
+"var inp;if(t=='b')inp='<input type=checkbox id=\"'+k+'\"'+(v?' checked':'')+'>';"
+"else if(t=='n')inp='<input type=number id=\"'+k+'\" value=\"'+v+'\">';"
+"else inp='<input type=text id=\"'+k+'\" value=\"'+(v==null?'':String(v).replace(/\"/g,'&quot;'))+'\">';"
+"h+='<div class=r><label>'+lbl+'</label>'+inp+'</div>';}"
+"document.getElementById('f').innerHTML=h;}"
+"function load(){fetch('/api/settings').then(r=>r.json()).then(j=>{S=j;build();});}"
+"function save(){var o={};for(var i=0;i<SCHEMA.length;i++){var s=SCHEMA[i];if(s[1]=='h')continue;"
+"var k=s[0],t=s[2],e=document.getElementById(k);if(!e)continue;"
+"o[k]=t=='b'?(e.checked?1:0):(t=='n'?parseInt(e.value||'0'):e.value);}"
+"fetch('/api/settings',{method:'POST',body:JSON.stringify(o)}).then(r=>r.json()).then(j=>{"
+"document.getElementById('msg').textContent=j.ok?'Saved. '+(j.note||''):'Error';});}"
+"load();"
+"</script></body></html>";
+
+static int handle_settings_page(int fd) {
+    size_t n = sizeof(SETTINGS_HTML) - 1;
+    char hdr[160];
+    int hn = snprintf(hdr, sizeof hdr,
+        "HTTP/1.1 200 OK\r\nContent-Type: text/html; charset=utf-8\r\n"
+        "Content-Length: %zu\r\n\r\n", n);
+    if (sock_send_all(fd, hdr, hn) < 0) return -1;
+    return sock_send_all(fd, SETTINGS_HTML, n);
+}
+
 static int dispatch(int fd, char * req) {
     char method[8] = "", path[256] = "";
     if (sscanf(req, "%7s %255s", method, path) != 2) {
@@ -737,6 +879,9 @@ static int dispatch(int fd, char * req) {
         if (!strcmp(path, "/api/state/stream"))  return handle_state_stream(fd);
         if (!strcmp(path, "/api/packages"))      return handle_packages_get(fd);
         if (!strcmp(path, "/api/schedule"))      return handle_schedule_get(fd);
+        if (!strcmp(path, "/api/settings"))      return handle_settings_get(fd);
+        if (!strcmp(path, "/settings") || !strcmp(path, "/settings.html"))
+            return handle_settings_page(fd);
         return serve_static(fd, path);
     }
     if (!strcmp(method, "POST")) {
@@ -744,6 +889,7 @@ static int dispatch(int fd, char * req) {
         if (!strcmp(path, "/api/program"))  return handle_program(fd, body);
         if (!strcmp(path, "/api/schedule")) return handle_schedule_post(fd, body);
         if (!strcmp(path, "/api/curtain"))  return handle_curtain(fd, body);
+        if (!strcmp(path, "/api/settings")) return handle_settings_post(fd, body);
         if (!strcmp(path, "/api/packages")) return handle_packages_post(fd, body);
         if (!strcmp(path, "/api/email"))    return handle_email_post(fd, body);
         /* POST /api/packages/<id>/receive */

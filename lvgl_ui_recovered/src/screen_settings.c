@@ -788,6 +788,60 @@ static void open_zwave(lv_event_t * e) {
 }
 
 /* Adapters tile-tap: push the meter/boiler adapter status + diagnostics screen. */
+/* Restart the freetoon UI from within the UI. _exit(0) → ui_launcher.sh
+ * respawns toonui (re-reading toonui.cfg), so this also applies any settings
+ * edits without an SSH round-trip. Confirm-gated to avoid an accidental tap. */
+static lv_obj_t * g_restart_modal = NULL;
+static void restart_dismiss(void) { if (g_restart_modal) { lv_obj_del(g_restart_modal); g_restart_modal = NULL; } }
+static void on_restart_no(lv_event_t * e)  { (void)e; restart_dismiss(); }
+static void on_restart_yes(lv_event_t * e) {
+    (void)e;
+    settings_save();
+    fprintf(stderr, "[settings] user requested UI restart — exiting\n");
+    fflush(NULL);
+    _exit(0);
+}
+static void open_restart_confirm(lv_event_t * e) {
+    (void)e;
+    g_restart_modal = lv_obj_create(scr_root);
+    lv_obj_set_size(g_restart_modal, 1024, 600);
+    lv_obj_set_pos(g_restart_modal, 0, 0);
+    lv_obj_set_style_bg_color(g_restart_modal, lv_color_hex(0x000000), 0);
+    lv_obj_set_style_bg_opa(g_restart_modal, LV_OPA_70, 0);
+    lv_obj_set_style_border_width(g_restart_modal, 0, 0);
+    lv_obj_clear_flag(g_restart_modal, LV_OBJ_FLAG_SCROLLABLE);
+
+    lv_obj_t * card = lv_obj_create(g_restart_modal);
+    lv_obj_set_size(card, 620, 250);
+    lv_obj_center(card);
+    lv_obj_set_style_bg_color(card, lv_color_hex(0x16243a), 0);
+    lv_obj_set_style_border_width(card, 0, 0);
+    lv_obj_set_style_radius(card, 14, 0);
+    lv_obj_clear_flag(card, LV_OBJ_FLAG_SCROLLABLE);
+
+    lv_obj_t * t = lv_label_create(card);
+    lv_obj_set_style_text_color(t, lv_color_hex(0xffffff), 0);
+    lv_obj_set_style_text_font(t, &lv_font_montserrat_22, 0);
+    lv_obj_set_width(t, 560);
+    lv_label_set_long_mode(t, LV_LABEL_LONG_WRAP);
+    lv_label_set_text(t, "Restart the freetoon UI now?\n\nIt reloads settings from toonui.cfg and comes back in a few seconds.");
+    lv_obj_align(t, LV_ALIGN_TOP_LEFT, 14, 12);
+
+    lv_obj_t * yes = lv_btn_create(card);
+    lv_obj_set_size(yes, 180, 52);
+    lv_obj_align(yes, LV_ALIGN_BOTTOM_RIGHT, -12, -12);
+    lv_obj_set_style_bg_color(yes, lv_color_hex(0x2e6e3a), 0);
+    lv_obj_add_event_cb(yes, on_restart_yes, LV_EVENT_CLICKED, NULL);
+    lv_obj_t * yl = lv_label_create(yes); lv_label_set_text(yl, "Restart"); lv_obj_center(yl);
+
+    lv_obj_t * no = lv_btn_create(card);
+    lv_obj_set_size(no, 180, 52);
+    lv_obj_align(no, LV_ALIGN_BOTTOM_LEFT, 12, -12);
+    lv_obj_set_style_bg_color(no, lv_color_hex(0x3a4658), 0);
+    lv_obj_add_event_cb(no, on_restart_no, LV_EVENT_CLICKED, NULL);
+    lv_obj_t * nl = lv_label_create(no); lv_label_set_text(nl, "Cancel"); lv_obj_center(nl);
+}
+
 static void open_adapters(lv_event_t * e) {
     (void)e;
     ui_push(screen_adapters_create());
@@ -2117,6 +2171,8 @@ lv_obj_t * screen_settings_create(void) {
               "scan & connect", open_wifi); n++;
     make_tile(GX(n), GY(n), NULL, LV_SYMBOL_CHARGE, "Adapters",
               "meter & boiler", open_adapters); n++;
+    make_tile(GX(n), GY(n), NULL, LV_SYMBOL_REFRESH, "Restart UI",
+              "reload settings", open_restart_confirm); n++;
     #undef GX
     #undef GY
 

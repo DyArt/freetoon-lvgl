@@ -134,4 +134,24 @@ int boxtalk_set_manual(void);
  * path. Returns 0 on send success, <0 if the broker socket is down. */
 int boxtalk_subscribe_service(const char * service_id);
 
+/* hdrv_zwave (built-in Z-Wave controller) — native BoxTalk path.
+ * Response to GetDevices lands in zwave_response_buf (poll zwave_response_ready,
+ * clear by writing 0). */
+extern volatile int zwave_response_ready;
+extern char         zwave_response_buf[16384];
+int boxtalk_zwave_get_devices(void);
+int boxtalk_zwave_heal(void);
+int boxtalk_zwave_include(int start);   /* 1=begin add, 0=stop */
+int boxtalk_zwave_exclude(int start);   /* 1=begin remove, 0=stop */
+int boxtalk_zwave_basic_set(const char * uuid, int state);
+int boxtalk_zwave_set_name(const char * uuid, const char * name);
+
+/* hcb_netcon (WiFi) — native BoxTalk path. Scan/status responses land in
+ * netcon_response_buf (poll netcon_response_ready, clear by writing 0). */
+extern volatile int netcon_response_ready;
+extern char         netcon_response_buf[16384];
+int boxtalk_wifi_get_status(void);
+int boxtalk_wifi_scan(void);
+int boxtalk_wifi_connect(const char * ssid, const char * key);
+
 #endif

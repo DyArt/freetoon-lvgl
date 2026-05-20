@@ -742,6 +742,18 @@ static void open_marketplace(lv_event_t * e) {
     ui_push(screen_marketplace_create());
 }
 
+/* Z-Wave tile-tap: push the built-in Z-Wave controller management screen. */
+static void open_zwave(lv_event_t * e) {
+    (void)e;
+    ui_push(screen_zwave_create());
+}
+
+/* WiFi tile-tap: push the WiFi scan/connect/status screen. */
+static void open_wifi(lv_event_t * e) {
+    (void)e;
+    ui_push(screen_wifi_create());
+}
+
 static void open_uimode_modal(lv_event_t * e) {
     (void)e;
     lv_obj_t * p = modal_open("UI mode", 440);
@@ -2027,6 +2039,10 @@ lv_obj_t * screen_settings_create(void) {
               "install integrations", open_marketplace); n++;
     make_tile(GX(n), GY(n), NULL, LV_SYMBOL_HOME, "Tiles",
               "assign home tiles", open_tile_slots_modal); n++;
+    make_tile(GX(n), GY(n), NULL, LV_SYMBOL_SETTINGS, "Z-Wave",
+              "built-in devices", open_zwave); n++;
+    make_tile(GX(n), GY(n), NULL, LV_SYMBOL_WIFI, "WiFi",
+              "scan & connect", open_wifi); n++;
     #undef GX
     #undef GY
 

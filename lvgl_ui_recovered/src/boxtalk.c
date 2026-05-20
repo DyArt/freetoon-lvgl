@@ -442,12 +442,130 @@ static void handle_msg(const char* xml) {
             rrd_response_ready = 1;
             fprintf(stderr, "[bxt] GetRraData response %zu bytes\n", n);
         }
+        /* hdrv_zwave GetDevices response — capture the device set for the
+         * Z-Wave screen. Match on the device-list markers so we catch it
+         * regardless of the exact response verb wrapper. */
+        if ((strstr(xml, "GetDevices") || strstr(xml, "supportedCC") ||
+             strstr(xml, "nodeIdInfo")) && strstr(xml, "class=\"response\"")) {
+            size_t n = strlen(xml);
+            if (n >= sizeof(zwave_response_buf)) n = sizeof(zwave_response_buf) - 1;
+            memcpy(zwave_response_buf, xml, n);
+            zwave_response_buf[n] = 0;
+            zwave_response_ready = 1;
+            fprintf(stderr, "[bxt] ZWAVE response %zu bytes\n", n);
+        }
+        /* hcb_netcon wireless responses — capture for the WiFi screen. */
+        if ((strstr(xml, "WirelessNetwork") || strstr(xml, "GetWireless")) &&
+            strstr(xml, "class=\"response\"")) {
+            size_t n = strlen(xml);
+            if (n >= sizeof(netcon_response_buf)) n = sizeof(netcon_response_buf) - 1;
+            memcpy(netcon_response_buf, xml, n);
+            netcon_response_buf[n] = 0;
+            netcon_response_ready = 1;
+            fprintf(stderr, "[bxt] NETCON response %zu bytes\n", n);
+        }
     }
 }
 
 /* ---- RRD GetRraData request/response plumbing ---- */
 volatile int rrd_response_ready = 0;
 char         rrd_response_buf[16384];
+
+/* ---- hdrv_zwave (built-in Z-Wave controller) plumbing ---- */
+#define ZWAVE_UUID "qb-659918000101-2011A0LOHI:hdrv_zwave"
+volatile int zwave_response_ready = 0;
+char         zwave_response_buf[16384];
+
+/* Build + send a hdrv_zwave action on serviceId specific1. `verb` is the
+ * U-element name; `inner` is the (already-escaped) child-element payload. */
+static int zwave_action(const char * verb, const char * inner, const char * tag) {
+    char xml[1024];
+    snprintf(xml, sizeof xml,
+        "<action class=\"invoke\" uuid=\"%s\" destuuid=\"%s\" "
+        "serviceid=\"urn:hcb-hae-com:serviceId:specific1\" requestid=\"%d-%s\">"
+        "<u:%s xmlns:u=\"urn:hcb-hae-com:service:specific1:1\">%s</u:%s></action>",
+        OUR_UUID, ZWAVE_UUID, getpid(), tag, verb, inner ? inner : "", verb);
+    return send_msg(xml);
+}
+
+/* Request the full Z-Wave device set. Response captured in zwave_response_buf
+ * (poll zwave_response_ready, clear by writing 0). */
+int boxtalk_zwave_get_devices(void) {
+    zwave_response_ready = 0;
+    return zwave_action("GetDevices", NULL, "zwd");
+}
+
+/* Network heal — routing/neighbour update for all nodes. */
+int boxtalk_zwave_heal(void) {
+    return zwave_action("NodeNeighborUpdate", "<timeout>300</timeout>", "zwh");
+}
+
+/* Inclusion (add). start!=0 begins add mode; start==0 stops it. */
+int boxtalk_zwave_include(int start) {
+    if (start)
+        return zwave_action("IncludeDevice",
+            "<event>add</event><lowPower>0</lowPower><timeout>60</timeout>", "zwi");
+    return zwave_action("IncludeDevice", "<event>stop</event>", "zwi");
+}
+
+/* Exclusion (remove). start!=0 begins delete mode; start==0 stops it. */
+int boxtalk_zwave_exclude(int start) {
+    if (start)
+        return zwave_action("ExcludeDevice",
+            "<event>delete</event><timeout>30</timeout>", "zwe");
+    return zwave_action("ExcludeDevice", "<event>stop</event>", "zwe");
+}
+
+/* ---- hcb_netcon (WiFi / network manager) plumbing ---- */
+#define NETCON_UUID "qb-659918000101-2011A0LOHI:hcb_netcon"
+volatile int netcon_response_ready = 0;
+char         netcon_response_buf[16384];
+
+static int netcon_action(const char * verb, const char * inner, const char * tag) {
+    char xml[1024];
+    snprintf(xml, sizeof xml,
+        "<action class=\"invoke\" uuid=\"%s\" destuuid=\"%s\" "
+        "serviceid=\"urn:hcb-hae-com:serviceId:NetworkInformation\" requestid=\"%d-%s\">"
+        "<u:%s xmlns:u=\"urn:hcb-hae-com:service:NetworkInformation:1\">%s</u:%s></action>",
+        OUR_UUID, NETCON_UUID, getpid(), tag, verb, inner ? inner : "", verb);
+    return send_msg(xml);
+}
+
+/* Current wireless connection info (read-only — no scan). */
+int boxtalk_wifi_get_status(void) {
+    netcon_response_ready = 0;
+    return netcon_action("GetWirelessNetworkInformation", NULL, "wfi");
+}
+
+/* Trigger a scan + return the visible networks. NOTE: briefly disrupts the
+ * wireless interface (hcb_netcon re-inits to scan). */
+int boxtalk_wifi_scan(void) {
+    netcon_response_ready = 0;
+    return netcon_action("GetWirelessNetworks", NULL, "wfs");
+}
+
+/* Connect to an SSID. key may be empty for open networks. ssid/key must be
+ * pre-sanitised (no XML metacharacters). */
+int boxtalk_wifi_connect(const char * ssid, const char * key) {
+    char inner[256];
+    snprintf(inner, sizeof inner,
+        "<SSID>%s</SSID><EncryptionKey>%s</EncryptionKey>", ssid, key ? key : "");
+    return netcon_action("SetWirelessNetworkInformation", inner, "wfc");
+}
+
+/* Switch a binary device on (1) / off (0). Targets the device uuid. */
+int boxtalk_zwave_basic_set(const char * uuid, int state) {
+    char inner[160];
+    snprintf(inner, sizeof inner, "<uuid>%s</uuid><state>%d</state>", uuid, state ? 1 : 0);
+    return zwave_action("basicSet", inner, "zwb");
+}
+
+/* Rename a device. name must be pre-sanitised (no XML metacharacters). */
+int boxtalk_zwave_set_name(const char * uuid, const char * name) {
+    char inner[256];
+    snprintf(inner, sizeof inner, "<uuid>%s</uuid><deviceName>%s</deviceName>", uuid, name);
+    return zwave_action("SetDeviceName", inner, "zwn");
+}
 
 int boxtalk_send_raw_xml(const char * xml) {
     if (!xml || sock_fd < 0) return -1;
@@ -661,6 +779,7 @@ static void send_initial_handshake(void) {
      * so this runs every handshake. tile_slots_init() must already have
      * populated the registry from main.c. */
     tile_slots_subscribe_all();
+
 
     fprintf(stderr, "[bxt] handshake + subscriptions sent\n");
 }

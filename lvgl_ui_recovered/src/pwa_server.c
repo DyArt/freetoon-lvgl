@@ -744,6 +744,7 @@ static int handle_settings_get(int fd) {
         "\"temp_offset_centi\":%d,\"show_dim_weather\":%d,"
         "\"show_dim_waste\":%d,\"dim_waste_lead_days\":%d,"
         "\"waste_postcode\":\"%s\",\"waste_housenr\":\"%s\","
+        "\"waste_provider\":%d,\"waste_ics_url\":\"%s\","
         "\"weather_location\":\"%s\",\"weather_location_id\":%d,"
         "\"forecast_mode\":%d,\"ot_bridge_mode\":\"%s\",\"otgw_host\":\"%s\","
         "\"mqtt_enabled\":%d,\"mqtt_host\":\"%s\",\"mqtt_port\":%d,\"mqtt_user\":\"%s\","
@@ -757,6 +758,7 @@ static int handle_settings_get(int fd) {
         settings.temp_offset_centi, settings.show_dim_weather,
         settings.show_dim_waste, settings.dim_waste_lead_days,
         settings.waste_postcode, settings.waste_housenr,
+        settings.waste_provider, settings.waste_ics_url,
         settings.weather_location, settings.weather_location_id,
         settings.forecast_mode, settings.ot_bridge_mode, settings.otgw_host,
         settings.mqtt_enabled, settings.mqtt_host, settings.mqtt_port, settings.mqtt_user,
@@ -786,6 +788,9 @@ static int handle_settings_post(int fd, const char * body) {
         snprintf(settings.waste_postcode, sizeof settings.waste_postcode, "%s", sv);
     if (extract_str(body, "waste_housenr", sv, sizeof sv))
         snprintf(settings.waste_housenr, sizeof settings.waste_housenr, "%s", sv);
+    if (extract_int(body, "waste_provider", &iv)) settings.waste_provider = !!iv;
+    if (extract_str(body, "waste_ics_url", sv, sizeof sv))
+        snprintf(settings.waste_ics_url, sizeof settings.waste_ics_url, "%s", sv);
     if (extract_int(body, "forecast_mode", &iv))      settings.forecast_mode = iv;
     if (extract_int(body, "mqtt_port", &iv))          settings.mqtt_port = iv;
     if (extract_int(body, "enable_p1_elec", &iv))     settings.enable_p1_elec = !!iv;
@@ -849,6 +854,7 @@ static const char SETTINGS_HTML[] =
 "['show_dim_weather','Weather on dim','b'],['show_dim_waste','Waste on dim','b'],"
 "['dim_waste_lead_days','Waste lead days (0-7)','n'],"
 "['waste_postcode','Waste postcode (e.g. 1671AD)','t'],['waste_housenr','Waste house nr','t'],"
+"['waste_provider','Waste: use ICS URL (0 HVC / 1 ICS)','n'],['waste_ics_url','Waste ICS calendar URL','t'],"
 "['Weather','h'],"
 "['weather_location','City (auto-resolves id)','t'],['weather_location_id','Buienradar id (auto)','n'],"
 "['forecast_mode','Forecast (0 auto/1 hourly/2 daily)','n'],"

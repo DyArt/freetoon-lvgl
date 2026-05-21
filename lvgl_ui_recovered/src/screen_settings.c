@@ -509,8 +509,14 @@ static void open_weather_modal(lv_event_t * e) {
 }
 
 static lv_obj_t * ta_waste_pc = NULL, * ta_waste_nr = NULL, * lbl_waste_status = NULL;
+static lv_obj_t * sw_waste_ics = NULL, * ta_waste_ics = NULL;
 static void on_waste_apply(lv_event_t * e) {
     (void)e;
+    if (sw_waste_ics)
+        settings.waste_provider = lv_obj_has_state(sw_waste_ics, LV_STATE_CHECKED) ? 1 : 0;
+    if (ta_waste_ics)
+        snprintf(settings.waste_ics_url, sizeof settings.waste_ics_url,
+                 "%s", lv_textarea_get_text(ta_waste_ics));
     if (ta_waste_pc) {
         /* Postcode → uppercase, strip spaces (HVC/most providers want "1671AD"). */
         const char * src = lv_textarea_get_text(ta_waste_pc);
@@ -535,7 +541,10 @@ static void on_waste_apply(lv_event_t * e) {
 
 static void open_waste_modal(lv_event_t * e) {
     (void)e;
-    lv_obj_t * p = modal_open("Waste", 470);
+    lv_obj_t * p = modal_open("Waste", 560);
+    lv_obj_add_flag(p, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_set_scroll_dir(p, LV_DIR_VER);
+    lv_obj_set_scrollbar_mode(p, LV_SCROLLBAR_MODE_AUTO);
     int y = 70;
     lv_obj_t * r;
 
@@ -575,7 +584,25 @@ static void open_waste_modal(lv_event_t * e) {
     lv_obj_align(ta_waste_nr, LV_ALIGN_TOP_LEFT, 560, y - 4);
     lv_textarea_set_one_line(ta_waste_nr, true);
     lv_textarea_set_text(ta_waste_nr, settings.waste_housenr);
-    y += 60;
+    y += 64;
+
+    /* Provider: HVC postcode (off) vs a generic ICS calendar URL (on) — the
+     * ICS path covers prezero/cyclus/dar/cranendonck/katwijk/hvc-ICS etc. */
+    r = panel_row(p, y, "Use ICS calendar URL", NULL);
+    sw_waste_ics = row_switch(r, settings.waste_provider == 1, NULL);
+    y += 82;
+
+    lv_obj_t * lbl_ics = lv_label_create(p);
+    lv_obj_set_style_text_color(lbl_ics, lv_color_hex(0xffffff), 0);
+    lv_obj_set_style_text_font(lbl_ics, &lv_font_montserrat_22, 0);
+    lv_label_set_text(lbl_ics, "ICS URL:");
+    lv_obj_align(lbl_ics, LV_ALIGN_TOP_LEFT, 4, y);
+    ta_waste_ics = lv_textarea_create(p);
+    lv_obj_set_size(ta_waste_ics, 560, 44);
+    lv_obj_align(ta_waste_ics, LV_ALIGN_TOP_LEFT, 240, y - 4);
+    lv_textarea_set_one_line(ta_waste_ics, true);
+    lv_textarea_set_text(ta_waste_ics, settings.waste_ics_url);
+    y += 64;
 
     lv_obj_t * apply = lv_btn_create(p);
     lv_obj_set_size(apply, 160, 48);

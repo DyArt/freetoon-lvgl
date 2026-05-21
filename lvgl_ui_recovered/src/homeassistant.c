@@ -1,8 +1,9 @@
 /*
  * Minimal Home Assistant REST client. Used by the home-screen Curtains
- * tile to read cover state and issue open/close/stop commands against
- * cover.gordijnen_voorkamer (which is a Zigbee2MQTT group of two
- * curtain motors in the voorkamer).
+ * tile to read cover state and issue open/close/stop commands against the
+ * cover entity configured in settings.curtain_entity, plus the room-lights
+ * screen. Host = settings.ha_host; entities all come from settings/config
+ * so nothing personal is baked into the binary.
  *
  * Auth: a single-line Long-Lived Access Token at /mnt/data/ha.cfg.
  */
@@ -17,13 +18,17 @@
 #include <string.h>
 #include <unistd.h>
 
-#define HA_HOST   "192.168.3.101:8123"
+/* Host comes from settings (settings.ha_host, "ip:port" no scheme) so no
+ * personal address ships in the binary. Empty host = HA disabled. */
+#define HA_HOST   (settings.ha_host)
 #define HA_POLL_S 10
 #define HA_TOKEN_PATH "/mnt/data/ha.cfg"
 
-#define CURTAIN_GROUP   "cover.gordijnen_voorkamer"
-#define CURTAIN_LEFT    "sensor.curtain_3_7c3c_batterij"
-#define CURTAIN_RIGHT   "sensor.curtain_3_7bc9_batterij"
+/* Curtain entity ids are user-specific too — sourced from settings.
+ * Empty curtain entity = curtain tile inactive. */
+#define CURTAIN_GROUP   (settings.curtain_entity)
+#define CURTAIN_LEFT    (settings.curtain_bat_a)
+#define CURTAIN_RIGHT   (settings.curtain_bat_b)
 
 ha_state_t ha_state = {0};
 
@@ -148,37 +153,49 @@ static int ha_call_light_service(const char * action, const char * entity_id) {
     return (rc == 0) ? 0 : -1;
 }
 
-/* Curated list of room lights the home Lights screen exposes. Hardcoded
- * because the user's HA has 40+ light entities, most of which are camera
- * indicators / WLED sub-segments / offline placeholders. Pick the ones
- * worth showing per room; extend by editing this table + bumping
- * HA_LIGHT_COUNT in the header. */
-ha_light_t ha_lights[HA_LIGHT_COUNT] = {
-    /* Woonkamer */
-    { "light.dimmer_voorkamer_licht", "Voorkamer",   "Woonkamer", 0,0,-1 },
-    { "light.bank_lamp",              "Bank lamp",   "Woonkamer", 0,0,-1 },
-    { "light.moodlight_papa",         "Moodlight",   "Woonkamer", 0,0,-1 },
-    { "light.spotje_rechts",          "Spotje R",    "Woonkamer", 0,0,-1 },
-    { "light.main_light",             "Main",        "Woonkamer", 0,0,-1 },
-    { "light.ledstrip_tv",            "TV strip",    "Woonkamer", 0,0,-1 },
-    /* Keuken */
-    { "light.wled_keukenkast",        "WLED kast",   "Keuken",    0,0,-1 },
-    { "light.led_strip_aanrecht",     "Aanrecht",    "Keuken",    0,0,-1 },
-    { "light.keuken_begin",           "Keuken begin","Keuken",    0,0,-1 },
-    { "light.keuken_eind",            "Keuken eind", "Keuken",    0,0,-1 },
-    { "light.spotjes_schouw",         "Schouw",      "Keuken",    0,0,-1 },
-    /* Slaapkamers / overig */
-    { "light.grote_slaapkamer_licht", "Slaapkamer",  "Boven",     0,0,-1 },
-    { "light.studeerkamer_licht",     "Studeer",     "Boven",     0,0,-1 },
-    { "light.lamp_van_kaya",          "Kaja",        "Boven",     0,0,-1 },
-};
+/* Room lights for the home Lights screen — loaded at runtime from
+ * /mnt/data/ha_lights.conf (one "entity_id|Name|Area" per line, '#' or
+ * blank lines ignored) so no personal entity ids ship in the binary.
+ * Empty array until ha_lights_load() runs; ha_light_count = rows loaded. */
+ha_light_t ha_lights[HA_LIGHT_COUNT];
+int        ha_light_count = 0;
+
+#define HA_LIGHTS_CONF "/mnt/data/ha_lights.conf"
+
+static void ha_lights_load(void) {
+    ha_light_count = 0;
+    FILE * f = fopen(HA_LIGHTS_CONF, "r");
+    if (!f) return;
+    char line[160];
+    while (fgets(line, sizeof(line), f) && ha_light_count < HA_LIGHT_COUNT) {
+        char * nl = strchr(line, '\n'); if (nl) *nl = 0;
+        char * cr = strchr(line, '\r'); if (cr) *cr = 0;
+        if (!line[0] || line[0] == '#') continue;
+        /* entity_id | name | area */
+        char * bar1 = strchr(line, '|');
+        if (!bar1) continue;
+        *bar1 = 0;
+        char * name = bar1 + 1;
+        char * bar2 = strchr(name, '|');
+        const char * area = "";
+        if (bar2) { *bar2 = 0; area = bar2 + 1; }
+        ha_light_t * L = &ha_lights[ha_light_count];
+        snprintf(L->entity_id, sizeof(L->entity_id), "%s", line);
+        snprintf(L->name,      sizeof(L->name),      "%s", name);
+        snprintf(L->area,      sizeof(L->area),      "%s", area);
+        L->on = 0; L->available = 0; L->brightness = -1;
+        ha_light_count++;
+    }
+    fclose(f);
+    fprintf(stderr, "[ha] loaded %d lights from " HA_LIGHTS_CONF "\n", ha_light_count);
+}
 
 /* Refresh every light's on/availability/brightness. Cheap — one
  * /api/states/<id> call per light. ~14 small requests, runs in the same
  * thread as the curtain poll. */
 static void poll_lights(void) {
     char body[512];
-    for (int i = 0; i < HA_LIGHT_COUNT; i++) {
+    for (int i = 0; i < ha_light_count; i++) {
         ha_light_t * L = &ha_lights[i];
         if (ha_get_state(L->entity_id, body, sizeof(body)) != 0) {
             L->available = 0;
@@ -336,15 +353,18 @@ static void poll_life360_one(const char * entity_id, char * out, size_t outsz) {
 }
 
 static void poll_life360(void) {
-    poll_life360_one("device_tracker.life360_ronald_brakeboer",
-                     ha_state.loc_ronald, sizeof(ha_state.loc_ronald));
-    poll_life360_one("device_tracker.life360_caja_brakeboer",
-                     ha_state.loc_caja,   sizeof(ha_state.loc_caja));
+    if (settings.life360_a_entity[0])
+        poll_life360_one(settings.life360_a_entity,
+                         ha_state.loc_a, sizeof(ha_state.loc_a));
+    if (settings.life360_b_entity[0])
+        poll_life360_one(settings.life360_b_entity,
+                         ha_state.loc_b,   sizeof(ha_state.loc_b));
 }
 
 static void poll_once(void) {
     static int miss = 0;
     char body[1024];
+    if (!CURTAIN_GROUP[0]) return;   /* no curtain entity configured */
     if (ha_get_state(CURTAIN_GROUP, body, sizeof(body)) != 0) {
         /* Single failed fetch isn't enough to drop the offline flag — HA
          * can be slow during its own service-call processing. Tolerate up
@@ -424,7 +444,12 @@ int ha_start(void) {
         fprintf(stderr, "[ha] integration disabled — not starting poller\n");
         return 0;
     }
+    if (!settings.ha_host[0]) {
+        fprintf(stderr, "[ha] no host configured — not starting poller\n");
+        return 0;
+    }
     load_token();
+    ha_lights_load();
     if (!g_token[0]) {
         fprintf(stderr, "[ha] no token at " HA_TOKEN_PATH " — HA tile will stay disconnected\n");
     }

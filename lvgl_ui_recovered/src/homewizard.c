@@ -1,7 +1,7 @@
 /*
- * Background poller for two HomeWizard P1 devices.
- *   192.168.99.69  = HWE-P1   (electricity + gas)
- *   192.168.99.115 = HWE-WTR  (water)
+ * Background poller for two HomeWizard P1 devices. Their LAN addresses come
+ * from settings (settings.p1_elec_host / p1_water_host) so no personal IP is
+ * baked into the binary; a poller is skipped when its host is empty.
  *
  * Both expose GET /api/v1/data returning a flat JSON object.
  * We parse the handful of fields we need with strstr/strtod; no JSON
@@ -60,9 +60,9 @@ static double parse_num(const char * json, const char * key, double dflt) {
 }
 
 static void poll_p1(void) {
-    if (!settings.enable_p1_elec) { hw_state.connected_p1 = 0; return; }
+    if (!settings.enable_p1_elec || !settings.p1_elec_host[0]) { hw_state.connected_p1 = 0; return; }
     static char body[4096];
-    if (http_get("192.168.99.69", "/api/v1/data", body, sizeof(body)) != 0) {
+    if (http_get(settings.p1_elec_host, "/api/v1/data", body, sizeof(body)) != 0) {
         hw_state.connected_p1 = 0;
         return;
     }
@@ -102,13 +102,13 @@ static int   session_zero_seconds = 0;
 static float prev_total_m3 = -1.0f;
 
 static void poll_water(void) {
-    if (!settings.enable_p1_water) {
+    if (!settings.enable_p1_water || !settings.p1_water_host[0]) {
         hw_state.connected_water = 0;
         hw_state.water_lpm = 0;
         return;
     }
     static char body[2048];
-    if (http_get("192.168.99.115", "/api/v1/data", body, sizeof(body)) != 0) {
+    if (http_get(settings.p1_water_host, "/api/v1/data", body, sizeof(body)) != 0) {
         hw_state.connected_water = 0;
         /* On a disconnect, zero the live flow too — otherwise the home
          * tile keeps the stale L/min reading (and its spinner) up

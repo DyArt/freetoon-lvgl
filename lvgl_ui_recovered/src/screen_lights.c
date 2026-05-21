@@ -72,7 +72,7 @@ static void refresh_cb(lv_timer_t * t) {
         else
             lv_obj_clear_flag(ha_offline_overlay, LV_OBJ_FLAG_HIDDEN);
     }
-    for (int i = 0; i < HA_LIGHT_COUNT; i++) {
+    for (int i = 0; i < ha_light_count; i++) {
         if (!rows[i].lbl_state) continue;
         if (!ha_lights[i].available) {
             lv_label_set_text(rows[i].lbl_state, "offline");
@@ -160,7 +160,7 @@ static void build_area_card(int col, const char * area_name) {
     lv_obj_align(hdr, LV_ALIGN_TOP_LEFT, 4, 0);
 
     int y_row = 36;
-    for (int i = 0; i < HA_LIGHT_COUNT; i++) {
+    for (int i = 0; i < ha_light_count; i++) {
         if (strcmp(ha_lights[i].area, area_name) != 0) continue;
         build_light_row(card, i, y_row);
         y_row += 50;

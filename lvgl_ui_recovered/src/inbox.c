@@ -122,6 +122,8 @@ void inbox_mark_read(const char * uuid) {
    DeleteNotification verb takes type+subType (not uuid in qt-gui's usage)
    but accepts uuid-targeting in newer firmwares. Send both for safety. */
 extern int boxtalk_send_raw_xml(const char * xml);   /* declared inline below */
+extern const char * boxtalk_our_uuid(void);
+extern const char * boxtalk_usermsg_uuid(void);
 void inbox_delete(const char * uuid) {
     if (!uuid) return;
     /* find message to get its type/subType */
@@ -140,13 +142,13 @@ void inbox_delete(const char * uuid) {
 
     char xml[640];
     snprintf(xml, sizeof(xml),
-        "<action class=\"invoke\" uuid=\"qb-659918000101-2011A0LOHI:toonui\" "
-        "destuuid=\"qb-659918000101-2011A0LOHI:happ_usermsg\" "
+        "<action class=\"invoke\" uuid=\"%s\" "
+        "destuuid=\"%s\" "
         "serviceid=\"urn:hcb-hae-com:serviceId:Notification\">"
         "<u:DeleteNotification xmlns:u=\"urn:hcb-hae-com:service:Notification:1\">"
         "<type>%s</type><subType>%s</subType><uuid>%s</uuid>"
         "</u:DeleteNotification></action>",
-        type, st, uuid);
+        boxtalk_our_uuid(), boxtalk_usermsg_uuid(), type, st, uuid);
     boxtalk_send_raw_xml(xml);
 
     /* Local removal — happ_usermsg will send a follow-up UpdateDataSet

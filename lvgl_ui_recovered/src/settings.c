@@ -22,7 +22,7 @@ settings_t settings = {
     .dim_waste_lead_days = 2,
     .vnc_enabled       = 0,
     .vnc_pass          = "",
-    .weather_location    = "Medemblik",
+    .weather_location    = "De Bilt",
     /* GeoNames id understood by forecast.buienradar.nl/2.0/forecast/<id>.
      * 2757783 = De Bilt — central NL national fallback. The KNMI station
      * code 6249 happens to collide with an unrelated mid-east location
@@ -45,17 +45,15 @@ settings_t settings = {
      * and unaffected by this). Default off: the proxy ships disabled, so a
      * fresh install shouldn't claim "proxy" before the user enables it. */
     .ot_bridge_mode      = "off",
-    .otgw_host           = "192.168.99.21",
+    .otgw_host           = "",            /* set per-device in Settings → OT Bridge */
     .otgw_user           = "",
     .otgw_pass           = "",
-    /* MQTT defaults match the existing /mnt/data/mqtt.cfg so first boot
-     * after the upgrade keeps the banner subscriber alive without manual
-     * config. User edits in Settings → MQTT take precedence and survive
-     * a reboot. */
-    .mqtt_enabled        = 1,
-    .mqtt_host           = "192.168.3.101",
+    /* MQTT is opt-in and unconfigured by default — no personal broker baked
+     * into the public binary. Enable + fill host/user in Settings → MQTT. */
+    .mqtt_enabled        = 0,
+    .mqtt_host           = "",
     .mqtt_port           = 1883,
-    .mqtt_user           = "brakero1",
+    .mqtt_user           = "",
     .mqtt_pass           = "",
     .mqtt_topics         = {"home/packages/banner", "home/packages/state"},
     .mqtt_topic_count    = 2,
@@ -70,6 +68,20 @@ settings_t settings = {
     .tile_rotate_seconds = 10,
     .news_enabled        = 0,
     .news_rss_url        = "https://feeds.nos.nl/nosnieuwsalgemeen",
+    .auto_update_enabled = 0,
+    .auto_update_hour    = 2,
+    .ha_host             = "",
+    .life360_a_entity    = "",
+    .life360_a_name      = "",
+    .life360_b_entity    = "",
+    .life360_b_name      = "",
+    .curtain_entity      = "",
+    .curtain_bat_a       = "",
+    .curtain_bat_b       = "",
+    .p1_elec_host        = "",
+    .p1_water_host       = "",
+    .vent_host           = "",
+    .opnsense_host       = "",
     .client_mode         = 0,
     .master_host         = "",
     .boot_picker_enabled = 1,
@@ -90,19 +102,6 @@ static int file_has_content(const char * path) {
     int c = fgetc(f);
     fclose(f);
     return (c != EOF);
-}
-
-/* True if /mnt/data/p1bridge.conf has a line whose host part matches the
- * given prefix (e.g. "192.168.99.115="). Used to derive enable_p1_water. */
-static int p1conf_has_host(const char * host_eq) {
-    FILE * f = fopen("/mnt/data/p1bridge.conf", "r");
-    if (!f) return 0;
-    char line[256]; int hit = 0;
-    while (fgets(line, sizeof(line), f)) {
-        if (strncmp(line, host_eq, strlen(host_eq)) == 0) { hit = 1; break; }
-    }
-    fclose(f);
-    return hit;
 }
 
 void settings_load(void) {
@@ -207,6 +206,20 @@ void settings_load(void) {
         else if (strcmp(k, "news_enabled")    == 0) settings.news_enabled = iv;
         else if (strcmp(k, "news_rss_url")    == 0)
             snprintf(settings.news_rss_url, sizeof settings.news_rss_url, "%s", v);
+        else if (strcmp(k, "auto_update_enabled") == 0) settings.auto_update_enabled = iv;
+        else if (strcmp(k, "auto_update_hour")    == 0) settings.auto_update_hour = (iv < 0 || iv > 23) ? 2 : iv;
+        else if (strcmp(k, "ha_host")          == 0) snprintf(settings.ha_host, sizeof settings.ha_host, "%s", v);
+        else if (strcmp(k, "life360_a_entity") == 0) snprintf(settings.life360_a_entity, sizeof settings.life360_a_entity, "%s", v);
+        else if (strcmp(k, "life360_a_name")   == 0) snprintf(settings.life360_a_name, sizeof settings.life360_a_name, "%s", v);
+        else if (strcmp(k, "life360_b_entity") == 0) snprintf(settings.life360_b_entity, sizeof settings.life360_b_entity, "%s", v);
+        else if (strcmp(k, "life360_b_name")   == 0) snprintf(settings.life360_b_name, sizeof settings.life360_b_name, "%s", v);
+        else if (strcmp(k, "curtain_entity")   == 0) snprintf(settings.curtain_entity, sizeof settings.curtain_entity, "%s", v);
+        else if (strcmp(k, "curtain_bat_a")    == 0) snprintf(settings.curtain_bat_a, sizeof settings.curtain_bat_a, "%s", v);
+        else if (strcmp(k, "curtain_bat_b")    == 0) snprintf(settings.curtain_bat_b, sizeof settings.curtain_bat_b, "%s", v);
+        else if (strcmp(k, "p1_elec_host")     == 0) snprintf(settings.p1_elec_host, sizeof settings.p1_elec_host, "%s", v);
+        else if (strcmp(k, "p1_water_host")    == 0) snprintf(settings.p1_water_host, sizeof settings.p1_water_host, "%s", v);
+        else if (strcmp(k, "vent_host")        == 0) snprintf(settings.vent_host, sizeof settings.vent_host, "%s", v);
+        else if (strcmp(k, "opnsense_host")    == 0) snprintf(settings.opnsense_host, sizeof settings.opnsense_host, "%s", v);
         else if (strcmp(k, "domoticz_user")   == 0)
             snprintf(settings.domoticz_user, sizeof settings.domoticz_user, "%s", v);
         else if (strcmp(k, "domoticz_pass")   == 0)
@@ -253,7 +266,7 @@ autodetect:
     if (!seen_p1_elec)
         settings.enable_p1_elec  = legacy ? 1 : file_has_content("/mnt/data/p1bridge.conf");
     if (!seen_p1_water)
-        settings.enable_p1_water = legacy ? 1 : p1conf_has_host("192.168.99.115=");
+        settings.enable_p1_water = legacy ? 1 : (settings.p1_water_host[0] != 0);
     if (!seen_vent)
         settings.enable_vent     = legacy ? 1 : file_has_content("/mnt/data/vent.conf");
     if (!seen_ha)
@@ -339,6 +352,20 @@ void settings_save(void) {
     fprintf(f, "tile_rotate_members=%s\n", settings.tile_rotate_members);
     fprintf(f, "news_enabled=%d\n", settings.news_enabled);
     fprintf(f, "news_rss_url=%s\n", settings.news_rss_url);
+    fprintf(f, "auto_update_enabled=%d\n", settings.auto_update_enabled);
+    fprintf(f, "auto_update_hour=%d\n", settings.auto_update_hour);
+    fprintf(f, "ha_host=%s\n", settings.ha_host);
+    fprintf(f, "life360_a_entity=%s\n", settings.life360_a_entity);
+    fprintf(f, "life360_a_name=%s\n", settings.life360_a_name);
+    fprintf(f, "life360_b_entity=%s\n", settings.life360_b_entity);
+    fprintf(f, "life360_b_name=%s\n", settings.life360_b_name);
+    fprintf(f, "curtain_entity=%s\n", settings.curtain_entity);
+    fprintf(f, "curtain_bat_a=%s\n", settings.curtain_bat_a);
+    fprintf(f, "curtain_bat_b=%s\n", settings.curtain_bat_b);
+    fprintf(f, "p1_elec_host=%s\n", settings.p1_elec_host);
+    fprintf(f, "p1_water_host=%s\n", settings.p1_water_host);
+    fprintf(f, "vent_host=%s\n", settings.vent_host);
+    fprintf(f, "opnsense_host=%s\n", settings.opnsense_host);
     fprintf(f, "domoticz_user=%s\n",   settings.domoticz_user);
     fprintf(f, "domoticz_pass=%s\n",   settings.domoticz_pass);
     fprintf(f, "enable_zwave=%d\n",    settings.enable_zwave);

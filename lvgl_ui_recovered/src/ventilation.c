@@ -24,7 +24,9 @@
 #include <errno.h>
 #include <time.h>
 
-#define VENT_HOST       "192.168.3.236"
+/* Itho host comes from settings (empty = vent disabled) so no personal IP
+ * ships in the binary. All call sites use it as a "%s" snprintf arg. */
+#define VENT_HOST       (settings.vent_host)
 /* MQTT push gives near-instant updates; REST poll is now a safety
  * fallback. 60s is plenty to detect a dead Itho without hammering it. */
 #define VENT_POLL_S     60
@@ -37,7 +39,7 @@ vent_state_t vent_state = {0};
 static const char * vent_wire_cmd(const char * user_preset);
 static const char * vent_user_preset(const char * wire_cmd);
 
-static char g_user[32] = "brakero1";
+static char g_user[32] = "";   /* filled from /mnt/data/vent.conf */
 static char g_pass[32] = "";
 
 static char g_settings_json[8192];
@@ -386,7 +388,7 @@ int vent_save_setting(int idx, int value) {
  * MQTT-side; commands still go through the REST API).
  *
  * Config: /mnt/data/mqtt.cfg, single line: host:user:pass
- * (same broker as Frigate/HA — 192.168.3.101 in this install).
+ * (empty/missing = no MQTT push; the REST poll still works).
  *
  * Topics covered:
  *   itho/ithostatus  — full status JSON, every state change
@@ -396,7 +398,7 @@ int vent_save_setting(int idx, int value) {
 #define MQTT_KEEPALIVE_S 60
 #define MQTT_PORT        1883
 
-static char g_mqtt_host[32] = "192.168.3.101";
+static char g_mqtt_host[32] = "";   /* filled from config; empty = no MQTT push */
 static char g_mqtt_user[32] = "";
 static char g_mqtt_pass[64] = "";
 
@@ -704,6 +706,10 @@ static void * vent_thread(void * arg) {
 int vent_start(void) {
     if (!settings.enable_vent) {
         fprintf(stderr, "[vent] integration disabled — not starting poller/MQTT\n");
+        return 0;
+    }
+    if (!settings.vent_host[0]) {
+        fprintf(stderr, "[vent] no host configured — not starting poller/MQTT\n");
         return 0;
     }
     load_conf();

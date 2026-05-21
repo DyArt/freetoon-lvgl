@@ -16,6 +16,8 @@ typedef struct {
                                  (0 disables; 1 = only on pickup day; 2 = day before + day of) */
     char waste_postcode[12];  /* e.g. "1671AD" — overrides the TSC waste config when set */
     char waste_housenr[8];    /* house number, e.g. "14" */
+    int  waste_provider;      /* 0 = HVC (postcode), 1 = generic ICS calendar URL */
+    char waste_ics_url[256];  /* full .ics calendar URL for provider 1 (prezero/cyclus/dar/…) */
     int  vnc_enabled;         /* 0/1 — run the x11vnc remote-control server */
     char vnc_pass[16];        /* VNC password (plaintext, max 8 effective chars;
                                  empty = no password). No spaces. */

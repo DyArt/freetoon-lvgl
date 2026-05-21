@@ -6,6 +6,8 @@
 #include "wastecollection.h"
 #include "http.h"
 #include "settings.h"
+#include <time.h>
+#include <ctype.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -203,25 +205,111 @@ int waste_next_2_pickups(waste_pickup_t * out1, waste_pickup_t * out2) {
     return 2;
 }
 
+/* ---- generic ICS provider (prezero / cyclus / dar / cranendonck / katwijk /
+ * any provider that exposes a downloadable .ics calendar). One parser handles
+ * them all: walk VEVENTs, take DTSTART (date) + SUMMARY (waste type), and keep
+ * the soonest upcoming date per type into the 4 fixed slots. ---- */
+static void ymd_today(char * out, int sz) {
+    time_t now = time(NULL);
+    struct tm tm; localtime_r(&now, &tm);
+    strftime(out, sz, "%Y-%m-%d", &tm);
+}
+
+/* Lowercased SUMMARY → slot index, or -1. Slots: 0 GFT, 1 Plastic, 2 Papier,
+ * 3 Restafval (same order/labels as the HVC path). */
+static int ics_slot(const char * s) {
+    if (strstr(s, "gft") || strstr(s, "groente") || strstr(s, "tuin"))     return 0;
+    if (strstr(s, "pmd") || strstr(s, "plastic") || strstr(s, "pbd") ||
+        strstr(s, "verpakk") || strstr(s, "drankk"))                       return 1;
+    if (strstr(s, "papier") || strstr(s, "karton"))                        return 2;
+    if (strstr(s, "rest"))                                                 return 3;
+    return -1;
+}
+
+static int parse_ics(const char * body) {
+    static const char * SLOT[WASTE_TYPES] = { "GFT", "Plastic", "Papier", "Restafval" };
+    char today[16]; ymd_today(today, sizeof today);
+    for (int i = 0; i < WASTE_TYPES; i++) {
+        snprintf(waste_state.items[i].label, sizeof waste_state.items[i].label, "%s", SLOT[i]);
+        waste_state.items[i].date[0] = 0;
+    }
+    int found = 0;
+    const char * p = body;
+    while ((p = strstr(p, "BEGIN:VEVENT")) != NULL) {
+        const char * end = strstr(p, "END:VEVENT");
+        const char * evend = end ? end : p + strlen(p);
+
+        /* DTSTART → first run of 8 digits (YYYYMMDD), even inside
+         * "DTSTART;VALUE=DATE:20260521" or "DTSTART:20260521T070000Z". */
+        char date[16] = "";
+        const char * d = strstr(p, "DTSTART");
+        if (d && d < evend) {
+            for (const char * q = d; *q && q < evend; q++) {
+                if (isdigit((unsigned char)*q)) {
+                    int n = 0; char buf[9];
+                    for (const char * r = q; n < 8 && isdigit((unsigned char)*r); r++) buf[n++] = *r;
+                    if (n == 8)
+                        snprintf(date, sizeof date, "%.4s-%.2s-%.2s", buf, buf + 4, buf + 6);
+                    break;
+                }
+            }
+        }
+
+        /* SUMMARY → slot */
+        int slot = -1;
+        const char * s = strstr(p, "SUMMARY");
+        if (s && s < evend) {
+            const char * c = strchr(s, ':');
+            if (c) {
+                char low[64]; int n = 0; c++;
+                while (*c && *c != '\r' && *c != '\n' && n < (int)sizeof(low) - 1)
+                    low[n++] = (char)tolower((unsigned char)*c++);
+                low[n] = 0;
+                slot = ics_slot(low);
+            }
+        }
+
+        /* Keep the soonest upcoming date per slot. */
+        if (date[0] && slot >= 0 && strcmp(date, today) >= 0) {
+            if (waste_state.items[slot].date[0] == 0 ||
+                strcmp(date, waste_state.items[slot].date) < 0) {
+                snprintf(waste_state.items[slot].date, sizeof waste_state.items[slot].date, "%s", date);
+                found = 1;
+            }
+        }
+        p = evend + 1;
+    }
+    return found ? 0 : -1;
+}
+
+static int fetch_ics(void) {
+    if (!settings.waste_ics_url[0]) return -1;
+    static char body[300 * 1024];
+    if (http_fetch(settings.waste_ics_url, body, sizeof body) != 0) return -1;
+    if (!strstr(body, "VEVENT")) return -1;
+    return parse_ics(body);
+}
+
 static void * waste_thread(void * arg) {
     (void)arg;
-    char pc[16], huis[8];
-    if (read_config(pc, sizeof(pc), huis, sizeof(huis)) != 0) {
-        fprintf(stderr, "[waste] no config — bailing\n");
-        return NULL;
-    }
-    fprintf(stderr, "[waste] postcode=%s huisnummer=%s\n", pc, huis);
     while (1) {
-        if (fetch_bag_id(pc, huis) == 0) {
-            if (fetch_afvalstromen() == 0) {
-                waste_state.connected = 1;
-                fprintf(stderr, "[waste] %s=%s %s=%s %s=%s %s=%s\n",
-                        waste_state.items[0].label, waste_state.items[0].date,
-                        waste_state.items[1].label, waste_state.items[1].date,
-                        waste_state.items[2].label, waste_state.items[2].date,
-                        waste_state.items[3].label, waste_state.items[3].date);
-            } else waste_state.connected = 0;
-        } else waste_state.connected = 0;
+        int ok = 0;
+        if (settings.waste_provider == 1 && settings.waste_ics_url[0]) {
+            ok = (fetch_ics() == 0);
+        } else {
+            char pc[16], huis[8];
+            if (read_config(pc, sizeof(pc), huis, sizeof(huis)) == 0 &&
+                fetch_bag_id(pc, huis) == 0 &&
+                fetch_afvalstromen() == 0)
+                ok = 1;
+        }
+        waste_state.connected = ok;
+        if (ok)
+            fprintf(stderr, "[waste] %s=%s %s=%s %s=%s %s=%s\n",
+                    waste_state.items[0].label, waste_state.items[0].date,
+                    waste_state.items[1].label, waste_state.items[1].date,
+                    waste_state.items[2].label, waste_state.items[2].date,
+                    waste_state.items[3].label, waste_state.items[3].date);
         sleep(4 * 60 * 60);   /* 4 hours */
     }
     return NULL;

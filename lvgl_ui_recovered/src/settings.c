@@ -40,8 +40,10 @@ settings_t settings = {
      * proxy is robust if the startup race is avoided. The bridge's
      * kick_thermstat + verify_thermstat_on_pty + force_pty_raw logic
      * handles re-entry. */
-    /* Default OFF: the quby_bridge proxy ships disabled, so claiming "proxy"
-     * before the user enables it misrepresents the running state. */
+    /* OT *bridge* mode (off/proxy/wireless) — the quby_bridge/OTGW proxy, NOT
+     * the keteladapter's OpenTherm link (that's boiler_type, read from the Toon
+     * and unaffected by this). Default off: the proxy ships disabled, so a
+     * fresh install shouldn't claim "proxy" before the user enables it. */
     .ot_bridge_mode      = "off",
     .otgw_host           = "192.168.99.21",
     .otgw_user           = "",
@@ -131,6 +133,9 @@ void settings_load(void) {
             snprintf(settings.waste_postcode, sizeof settings.waste_postcode, "%s", v);
         else if (strcmp(k, "waste_housenr")     == 0)
             snprintf(settings.waste_housenr, sizeof settings.waste_housenr, "%s", v);
+        else if (strcmp(k, "waste_provider")    == 0) settings.waste_provider = iv;
+        else if (strcmp(k, "waste_ics_url")     == 0)
+            snprintf(settings.waste_ics_url, sizeof settings.waste_ics_url, "%s", v);
         else if (strcmp(k, "show_dim_weather")  == 0) settings.show_dim_weather  = iv;
         else if (strcmp(k, "temp_offset_centi") == 0) settings.temp_offset_centi = iv;
         else if (strcmp(k, "weather_location_id") == 0) settings.weather_location_id = iv;
@@ -272,6 +277,8 @@ void settings_save(void) {
     fprintf(f, "dim_waste_lead_days=%d\n", settings.dim_waste_lead_days);
     fprintf(f, "waste_postcode=%s\n",      settings.waste_postcode);
     fprintf(f, "waste_housenr=%s\n",       settings.waste_housenr);
+    fprintf(f, "waste_provider=%d\n",      settings.waste_provider);
+    fprintf(f, "waste_ics_url=%s\n",       settings.waste_ics_url);
     fprintf(f, "vnc_enabled=%d\n",       settings.vnc_enabled);
     fprintf(f, "vnc_pass=%s\n",          settings.vnc_pass);
     fprintf(f, "weather_location=%s\n",    settings.weather_location);

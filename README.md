@@ -289,19 +289,29 @@ disable.
 
 ## Acknowledgements
 
+`freetoon-lvgl` is an independent alternative UI by **Ierlandfan**. Special
+thanks to **Quby / Eneco** for the underlying Toon platform and the BoxTalk /
+Quby protocol structure this UI builds on.
+
 * **OTGW** — Robert van den Breemen's HTTP-firmware fork of the OpenTherm
   Gateway is the boiler-side workhorse.
 * **Itho Wifi** — Arjen Hiemstra's add-on board + REST API made vent control
   trivial.
 * **HomeWizard** — open `/api/v1/data` on the HWE-P1 / HWE-WTR.
-* **LVGL** — the embedded UI library this app is built on.
+* **LVGL** — the embedded UI library this app is built on (MIT, © LVGL Kft).
+* **QR-Code-generator** — © Project Nayuki (MIT); **LodePNG** — © Lode
+  Vandevenne (zlib). Both bundled via LVGL.
 * **Toon community** — the reverse-engineering work scattered across
   hacktoon and various Tweakers threads that mapped out happ_thermstat,
   hcb_config and the Quby protocol.
 
 ## License
 
-This repository is published for educational and personal use. It contains no
-Eneco / Quby proprietary code. The stock Toon binaries (`happ_thermstat`,
-`hcb_config`, `keteladapter` firmware, …) remain Eneco's; nothing in this
-repo redistributes or modifies them.
+freetoon-lvgl (the UI and integration glue authored in this repository) is
+released under the **MIT License** — see [LICENSE](LICENSE).
+
+This repository contains no Eneco / Quby proprietary code. The stock Toon
+binaries (`happ_thermstat`, `hcb_config`, `keteladapter` firmware, …) remain
+the property of Eneco / Quby; nothing here redistributes or modifies them.
+Bundled third-party components (LVGL, QR-Code-generator, LodePNG) retain their
+own licenses and copyrights as noted in [LICENSE](LICENSE).

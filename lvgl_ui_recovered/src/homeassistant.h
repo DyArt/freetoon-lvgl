@@ -10,7 +10,7 @@
 
 typedef struct {
     volatile int   connected;          /* 0 until first successful poll  */
-    /* Curtain group `cover.gordijnen_voorkamer` (= "Gordijnen voorkamer"). */
+    /* Curtain cover group (settings.curtain_entity). */
     volatile int   curtain_pos;        /* 0..100 (current_position attr) */
     volatile int   curtain_is_closed;  /* 0/1 (is_closed attr)           */
     volatile int   curtain_battery;    /* % — min of the two child curtains */
@@ -19,31 +19,34 @@ typedef struct {
      * else "<city/region> > <street> > <number>" formatted from the
      * device_tracker.life360_* address attribute. 128 chars to fit longer
      * Dutch city + street names without truncation. */
-    char           loc_ronald[128];
-    char           loc_caja[128];
+    char           loc_a[128];
+    char           loc_b[128];
 } ha_state_t;
 
 extern ha_state_t ha_state;
 
-/* Per-light state. Hardcoded list of entities (see ha_lights[] in
- * homeassistant.c) — covers the rooms the user actually cares about.
+/* Per-light state. The list is loaded at runtime from
+ * /mnt/data/ha_lights.conf (one "entity_id|Name|Area" per line) so no
+ * personal entity ids ship in the binary. ha_light_count holds how many
+ * rows were loaded (0 = none configured → the Lights screen is empty).
  * State is polled in the same ha_thread; toggles are fire-and-forget. */
 typedef struct {
-    const char * entity_id;    /* "light.bank_lamp" */
-    const char * name;         /* "Bank lamp" (display) */
-    const char * area;         /* "Woonkamer" / "Keuken" / … (display group) */
-    volatile int on;           /* 0/1 — 0 also covers unavailable */
-    volatile int available;    /* 0 if HA says unavailable */
-    volatile int brightness;   /* 0..255, -1 if not reported */
+    char         entity_id[48];  /* "light.bank_lamp" */
+    char         name[24];       /* "Bank lamp" (display) */
+    char         area[20];       /* "Woonkamer" / "Keuken" / … (display group) */
+    volatile int on;             /* 0/1 — 0 also covers unavailable */
+    volatile int available;      /* 0 if HA says unavailable */
+    volatile int brightness;     /* 0..255, -1 if not reported */
 } ha_light_t;
 
-#define HA_LIGHT_COUNT 14
+#define HA_LIGHT_COUNT 32        /* array capacity (max rows from the conf) */
 extern ha_light_t ha_lights[HA_LIGHT_COUNT];
+extern int        ha_light_count;
 
 /* Start the poller (background thread, ~10s loop). Returns 0 on success. */
 int ha_start(void);
 
-/* Fire-and-forget actions on cover.gordijnen_voorkamer. Async — the HTTP
+/* Fire-and-forget actions on the configured curtain cover. Async — the HTTP
  * POST runs on a detached thread so LVGL stays responsive. */
 void ha_curtain_open_async(void);
 void ha_curtain_close_async(void);

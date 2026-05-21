@@ -140,6 +140,35 @@ typedef struct {
     int  tile_rotate_seconds;          /* 3..120 */
     char tile_rotate_members[256];     /* "id1,id2,id3" */
 
+    /* Home Assistant — host:port (no scheme), empty = HA disabled. The two
+     * presence entities + display names drive the Family tile (e.g. Life360
+     * device_trackers). All empty by default so nothing personal ships. */
+    char ha_host[64];
+    char life360_a_entity[64];
+    char life360_a_name[24];
+    char life360_b_entity[64];
+    char life360_b_name[24];
+    /* Curtain tile — HA cover entity + two optional battery sensors. Empty
+     * curtain_entity disables the curtain tile. All empty by default so no
+     * personal entity ids ship in the binary. */
+    char curtain_entity[64];
+    char curtain_bat_a[64];
+    char curtain_bat_b[64];
+
+    /* LAN hosts for the optional integrations + healthcheck probes. All
+     * empty by default so no personal network topology ships in the binary;
+     * a probe/poller is simply skipped when its host is empty. "ip" or
+     * "ip:port" / hostname, no scheme. */
+    char p1_elec_host[64];     /* HomeWizard P1 electricity meter */
+    char p1_water_host[64];    /* HomeWizard P1 water meter */
+    char vent_host[64];        /* Itho NRG-WiFi ventilation unit */
+    char opnsense_host[64];    /* router, for the "router offline" healthcheck */
+
+    /* Auto-update — when on, the update checker installs a newer release
+     * automatically around auto_update_hour (local), with a Toon banner. */
+    int  auto_update_enabled;
+    int  auto_update_hour;     /* 0..23, default 2 (≈02:00) */
+
     /* Newsreader — built-in RSS ticker above the forecast on the home screen.
      * Tapping a headline shows a QR to open the article on your phone. */
     int  news_enabled;

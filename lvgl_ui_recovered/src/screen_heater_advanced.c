@@ -2,7 +2,7 @@
  * Heater detail → Advanced — full list of OT DataId values, pulled directly
  * from OTGW's HTTP API. Polls every 4 s and renders one row per field.
  *
- * URL: http://192.168.99.21/api/v1/otgw/otmonitor
+ * URL: http://<settings.otgw_host>/api/v1/otgw/otmonitor
  * Response shape:
  *   {"otmonitor":[
  *     {"name":"flamestatus","value":"Off","unit":"","epoch":...},
@@ -15,11 +15,10 @@
  */
 #include "screens.h"
 #include "http.h"
+#include "settings.h"
 #include <stdio.h>
 #include <string.h>
 #include <stdlib.h>
-
-#define OTGW_URL "http://192.168.99.21/api/v1/otgw/otmonitor"
 
 static lv_obj_t * scr_root = NULL;
 static lv_obj_t * list_col = NULL;
@@ -106,7 +105,13 @@ static void rebuild_list(void) {
 
 static void on_refresh(lv_timer_t * t) {
     (void)t;
-    int rc = http_fetch(OTGW_URL, last_json, sizeof(last_json));
+    if (!settings.otgw_host[0]) {
+        if (lbl_status) lv_label_set_text(lbl_status, "no OTGW host configured");
+        return;
+    }
+    char url[160];
+    snprintf(url, sizeof(url), "http://%s/api/v1/otgw/otmonitor", settings.otgw_host);
+    int rc = http_fetch(url, last_json, sizeof(last_json));
     if (rc == 0) rebuild_list();
     else if (lbl_status) lv_label_set_text(lbl_status, "fetch failed");
 }

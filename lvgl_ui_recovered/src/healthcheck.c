@@ -16,8 +16,10 @@
 #include "healthcheck.h"
 #include "notify.h"
 #include "http.h"
+#include "settings.h"
 #include <pthread.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
 #include <sys/socket.h>
@@ -67,22 +69,73 @@ static int http_alive(const char * url) {
     return http_fetch(url, buf, sizeof(buf)) == 0 ? 0 : -1;
 }
 
-/* ---- per-service probes ---- */
-static int probe_ha(void)         { return http_alive("http://192.168.3.101:8123/auth/providers"); }
-static int probe_otgw(void)       { return http_alive("http://192.168.99.21/api/v0/settings"); }
+/* ---- per-service probes ----
+ * Hosts come from settings so no personal network topology is baked into
+ * the binary. A probe returns -1 ("skip") when its host isn't configured;
+ * the seen_up gate then keeps it silent. Buienradar + the 1.1.1.1 DNS
+ * reachability check are public/global so they stay hardcoded. */
+
+/* Split a "host" or "host:port" setting; returns the bare host in `out`
+ * and the port in *port (default `defport`). */
+static int split_host_port(const char * src, char * out, size_t outsz, int defport) {
+    if (!src[0]) { out[0] = 0; return defport; }
+    snprintf(out, outsz, "%s", src);
+    char * c = strchr(out, ':');
+    if (c) { *c = 0; int p = atoi(c + 1); return p > 0 ? p : defport; }
+    return defport;
+}
+
+static int probe_ha(void) {
+    if (!settings.ha_host[0]) return -1;
+    char url[160];
+    snprintf(url, sizeof(url), "http://%s/auth/providers", settings.ha_host);
+    return http_alive(url);
+}
+static int probe_otgw(void) {
+    if (!settings.otgw_host[0]) return -1;
+    char url[160];
+    snprintf(url, sizeof(url), "http://%s/api/v0/settings", settings.otgw_host);
+    return http_alive(url);
+}
 static int probe_buienradar(void) { return http_alive("https://data.buienradar.nl/2.0/feed/json"); }
-static int probe_mqtt(void)       { return tcp_open("192.168.3.101", 1883); }
-static int probe_p1_elec(void)    { return http_alive("http://192.168.99.69/api/v1/data"); }
-static int probe_p1_water(void)   { return http_alive("http://192.168.99.115/api/v1/data"); }
-static int probe_itho(void)       { return http_alive("http://192.168.3.236/"); }
-static int probe_opnsense(void)   { return tcp_open("192.168.3.227", 443); }
+static int probe_mqtt(void) {
+    if (!settings.mqtt_host[0]) return -1;
+    char host[64];
+    int port = split_host_port(settings.mqtt_host, host, sizeof(host),
+                               settings.mqtt_port > 0 ? settings.mqtt_port : 1883);
+    return tcp_open(host, port);
+}
+static int probe_p1_elec(void) {
+    if (!settings.p1_elec_host[0]) return -1;
+    char url[160];
+    snprintf(url, sizeof(url), "http://%s/api/v1/data", settings.p1_elec_host);
+    return http_alive(url);
+}
+static int probe_p1_water(void) {
+    if (!settings.p1_water_host[0]) return -1;
+    char url[160];
+    snprintf(url, sizeof(url), "http://%s/api/v1/data", settings.p1_water_host);
+    return http_alive(url);
+}
+static int probe_itho(void) {
+    if (!settings.vent_host[0]) return -1;
+    char url[160];
+    snprintf(url, sizeof(url), "http://%s/", settings.vent_host);
+    return http_alive(url);
+}
+static int probe_opnsense(void) {
+    if (!settings.opnsense_host[0]) return -1;
+    char host[64];
+    int port = split_host_port(settings.opnsense_host, host, sizeof(host), 443);
+    return tcp_open(host, port);
+}
 static int probe_internet(void)   { return tcp_open("1.1.1.1", 53); }
 
 static check_t g_checks[] = {
     { "ha_offline",         "Home Assistant niet bereikbaar",         probe_ha,          0, 1 },
     { "otgw_offline",       "OpenTherm Gateway niet bereikbaar",      probe_otgw,        0, 1 },
     { "buienradar_offline", "Buienradar (weer) niet bereikbaar",      probe_buienradar,  0, 1 },
-    { "mqtt_offline",       "MQTT broker (192.168.3.101:1883) down",  probe_mqtt,        0, 1 },
+    { "mqtt_offline",       "MQTT broker niet bereikbaar",            probe_mqtt,        0, 1 },
     { "p1_elec_offline",    "P1 elektriciteitsmeter niet bereikbaar", probe_p1_elec,     0, 1 },
     { "p1_water_offline",   "P1 watermeter niet bereikbaar",          probe_p1_water,    0, 1 },
     { "itho_offline",       "Itho ventilatie niet bereikbaar",        probe_itho,        0, 1 },

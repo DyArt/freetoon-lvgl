@@ -114,18 +114,18 @@ static int sock_fd = -1;
 static pthread_mutex_t send_lock = PTHREAD_MUTEX_INITIALIZER;
 
 /* Device UUIDs are derived from the local hostname at startup — on a Toon the
- * hostname IS the device serial (e.g. "qb-659918000101-2011A0LOHI"), and
+ * hostname IS the device serial (e.g. "qb-000000000000-0000000000"), and
  * targeted BoxTalk actions (Z-Wave, netcon, usermsg, rrd) must address the
  * *local* device or hcb_bxtproxy won't route them. Hardcoding one serial broke
  * every other Toon. The literals below are just the fallback if gethostname
  * fails or returns a non-"qb-" name. */
-static char dev_base[64]      = "qb-659918000101-2011A0LOHI";
-static char OUR_UUID[96]      = "qb-659918000101-2011A0LOHI:toonui";
-static char ZWAVE_UUID[96]    = "qb-659918000101-2011A0LOHI:hdrv_zwave";
-static char NETCON_UUID[96]   = "qb-659918000101-2011A0LOHI:hcb_netcon";
-static char USERMSG_UUID[96]  = "qb-659918000101-2011A0LOHI:happ_usermsg";
-static char RRD_UUID[96]      = "qb-659918000101-2011A0LOHI:hcb_rrd";
-static char THERMD_UUID[96]   = "qb-659918000101-2011A0LOHI:happ_thermstat";
+static char dev_base[64]      = "qb-000000000000-0000000000";
+static char OUR_UUID[96]      = "qb-000000000000-0000000000:toonui";
+static char ZWAVE_UUID[96]    = "qb-000000000000-0000000000:hdrv_zwave";
+static char NETCON_UUID[96]   = "qb-000000000000-0000000000:hcb_netcon";
+static char USERMSG_UUID[96]  = "qb-000000000000-0000000000:happ_usermsg";
+static char RRD_UUID[96]      = "qb-000000000000-0000000000:hcb_rrd";
+static char THERMD_UUID[96]   = "qb-000000000000-0000000000:happ_thermstat";
 
 static void bt_init_dev_uuids(void) {
     char hn[64] = {0};
@@ -138,6 +138,12 @@ static void bt_init_dev_uuids(void) {
     snprintf(RRD_UUID,     sizeof RRD_UUID,     "%s:hcb_rrd",     dev_base);
     snprintf(THERMD_UUID,  sizeof THERMD_UUID,  "%s:happ_thermstat", dev_base);
 }
+
+/* Runtime device UUIDs for other modules (inbox/notify) — avoids hardcoding
+ * the device serial anywhere. Valid after bt_init_dev_uuids() (called at
+ * connect); before that they hold the generic placeholder. */
+const char * boxtalk_our_uuid(void)     { return OUR_UUID; }
+const char * boxtalk_usermsg_uuid(void) { return USERMSG_UUID; }
 
 #define BUFCAP (64 * 1024)
 static char rxbuf[BUFCAP];

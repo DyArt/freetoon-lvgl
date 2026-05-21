@@ -43,8 +43,8 @@ static lv_obj_t * dim_fc_temp[WEATHER_FORECAST_DAYS];
 /* City header above the forecast strip — mirrors the home tile. */
 static lv_obj_t * dim_lbl_city = NULL;
 /* Life360 — stacked TOP_RIGHT under lbl_outside, opposite the waste block. */
-static lv_obj_t * dim_lbl_life360_ronald = NULL;
-static lv_obj_t * dim_lbl_life360_caja   = NULL;
+static lv_obj_t * dim_lbl_life360_a = NULL;
+static lv_obj_t * dim_lbl_life360_b   = NULL;
 static lv_obj_t * dim_vent_fan  = NULL;   /* spinning fan icon */
 static lv_obj_t * dim_vent_lbl  = NULL;   /* "57 %" — actual ExhFanSpeed */
 static lv_obj_t * dim_img_water = NULL;   /* drop icon, visible while pouring */
@@ -265,22 +265,24 @@ static void refresh_cb(lv_timer_t * t) {
 
     /* Life360 — top-right stack under the outside temp. Name prefix +
      * address; colour still identifies who's who. Hidden until data lands. */
-    if (dim_lbl_life360_ronald) {
-        if (ha_state.loc_ronald[0]) {
-            lv_label_set_text_fmt(dim_lbl_life360_ronald, "Ronald: %s",
-                                  ha_state.loc_ronald);
-            lv_obj_clear_flag(dim_lbl_life360_ronald, LV_OBJ_FLAG_HIDDEN);
+    if (dim_lbl_life360_a) {
+        if (ha_state.loc_a[0]) {
+            lv_label_set_text_fmt(dim_lbl_life360_a, "%s: %s",
+                                  settings.life360_a_name[0] ? settings.life360_a_name : "A",
+                                  ha_state.loc_a);
+            lv_obj_clear_flag(dim_lbl_life360_a, LV_OBJ_FLAG_HIDDEN);
         } else {
-            lv_obj_add_flag(dim_lbl_life360_ronald, LV_OBJ_FLAG_HIDDEN);
+            lv_obj_add_flag(dim_lbl_life360_a, LV_OBJ_FLAG_HIDDEN);
         }
     }
-    if (dim_lbl_life360_caja) {
-        if (ha_state.loc_caja[0]) {
-            lv_label_set_text_fmt(dim_lbl_life360_caja, "Caja: %s",
-                                  ha_state.loc_caja);
-            lv_obj_clear_flag(dim_lbl_life360_caja, LV_OBJ_FLAG_HIDDEN);
+    if (dim_lbl_life360_b) {
+        if (ha_state.loc_b[0]) {
+            lv_label_set_text_fmt(dim_lbl_life360_b, "%s: %s",
+                                  settings.life360_b_name[0] ? settings.life360_b_name : "B",
+                                  ha_state.loc_b);
+            lv_obj_clear_flag(dim_lbl_life360_b, LV_OBJ_FLAG_HIDDEN);
         } else {
-            lv_obj_add_flag(dim_lbl_life360_caja, LV_OBJ_FLAG_HIDDEN);
+            lv_obj_add_flag(dim_lbl_life360_b, LV_OBJ_FLAG_HIDDEN);
         }
     }
 
@@ -626,25 +628,25 @@ lv_obj_t * screen_dim_create(void) {
     /* Life360 — sits under the outside temp on the right edge, mirroring
      * the Family tile on the home screen. Right-aligned so longer street
      * names extend to the LEFT instead of clipping the bezel. */
-    dim_lbl_life360_ronald = lv_label_create(scr_root);
-    lv_obj_set_style_text_color(dim_lbl_life360_ronald, lv_color_hex(0x88aaff), 0);
-    lv_obj_set_style_text_font(dim_lbl_life360_ronald, &lv_font_montserrat_18, 0);
-    lv_obj_set_width(dim_lbl_life360_ronald, 340);
-    lv_obj_set_style_text_align(dim_lbl_life360_ronald, LV_TEXT_ALIGN_RIGHT, 0);
-    lv_label_set_long_mode(dim_lbl_life360_ronald, LV_LABEL_LONG_DOT);
-    lv_label_set_text(dim_lbl_life360_ronald, "");
-    lv_obj_align(dim_lbl_life360_ronald, LV_ALIGN_TOP_RIGHT, -30, 174);
-    lv_obj_add_flag(dim_lbl_life360_ronald, LV_OBJ_FLAG_HIDDEN);
+    dim_lbl_life360_a = lv_label_create(scr_root);
+    lv_obj_set_style_text_color(dim_lbl_life360_a, lv_color_hex(0x88aaff), 0);
+    lv_obj_set_style_text_font(dim_lbl_life360_a, &lv_font_montserrat_18, 0);
+    lv_obj_set_width(dim_lbl_life360_a, 340);
+    lv_obj_set_style_text_align(dim_lbl_life360_a, LV_TEXT_ALIGN_RIGHT, 0);
+    lv_label_set_long_mode(dim_lbl_life360_a, LV_LABEL_LONG_DOT);
+    lv_label_set_text(dim_lbl_life360_a, "");
+    lv_obj_align(dim_lbl_life360_a, LV_ALIGN_TOP_RIGHT, -30, 174);
+    lv_obj_add_flag(dim_lbl_life360_a, LV_OBJ_FLAG_HIDDEN);
 
-    dim_lbl_life360_caja = lv_label_create(scr_root);
-    lv_obj_set_style_text_color(dim_lbl_life360_caja, lv_color_hex(0xff88cc), 0);
-    lv_obj_set_style_text_font(dim_lbl_life360_caja, &lv_font_montserrat_18, 0);
-    lv_obj_set_width(dim_lbl_life360_caja, 340);
-    lv_obj_set_style_text_align(dim_lbl_life360_caja, LV_TEXT_ALIGN_RIGHT, 0);
-    lv_label_set_long_mode(dim_lbl_life360_caja, LV_LABEL_LONG_DOT);
-    lv_label_set_text(dim_lbl_life360_caja, "");
-    lv_obj_align(dim_lbl_life360_caja, LV_ALIGN_TOP_RIGHT, -30, 198);
-    lv_obj_add_flag(dim_lbl_life360_caja, LV_OBJ_FLAG_HIDDEN);
+    dim_lbl_life360_b = lv_label_create(scr_root);
+    lv_obj_set_style_text_color(dim_lbl_life360_b, lv_color_hex(0xff88cc), 0);
+    lv_obj_set_style_text_font(dim_lbl_life360_b, &lv_font_montserrat_18, 0);
+    lv_obj_set_width(dim_lbl_life360_b, 340);
+    lv_obj_set_style_text_align(dim_lbl_life360_b, LV_TEXT_ALIGN_RIGHT, 0);
+    lv_label_set_long_mode(dim_lbl_life360_b, LV_LABEL_LONG_DOT);
+    lv_label_set_text(dim_lbl_life360_b, "");
+    lv_obj_align(dim_lbl_life360_b, LV_ALIGN_TOP_RIGHT, -30, 198);
+    lv_obj_add_flag(dim_lbl_life360_b, LV_OBJ_FLAG_HIDDEN);
 
     /* Waste — 80×80 trash icon top-LEFT (mirroring the weather block).
        Visibility + label gated by settings + lead-days window. */

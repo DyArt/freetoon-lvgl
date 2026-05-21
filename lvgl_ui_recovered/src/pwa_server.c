@@ -708,7 +708,7 @@ static int extract_int(const char * body, const char * key, int * out) {
 }
 
 static int handle_settings_get(int fd) {
-    char body[2048];
+    char body[4096];
     int n = snprintf(body, sizeof body,
         "{"
         "\"auto_dim_enabled\":%d,\"auto_dim_seconds\":%d,"
@@ -725,6 +725,13 @@ static int handle_settings_get(int fd) {
         "\"enable_domoticz\":%d,\"domoticz_host\":\"%s\",\"domoticz_user\":\"%s\","
         "\"hide_offline_tiles\":%d,\"boot_picker_enabled\":%d,"
         "\"update_check_enabled\":%d,"
+        "\"ha_host\":\"%s\",\"life360_a_entity\":\"%s\",\"life360_a_name\":\"%s\","
+        "\"life360_b_entity\":\"%s\",\"life360_b_name\":\"%s\","
+        "\"curtain_entity\":\"%s\",\"curtain_bat_a\":\"%s\",\"curtain_bat_b\":\"%s\","
+        "\"p1_elec_host\":\"%s\",\"p1_water_host\":\"%s\",\"vent_host\":\"%s\",\"opnsense_host\":\"%s\","
+        "\"energy_source\":%d,\"auto_update_enabled\":%d,\"auto_update_hour\":%d,"
+        "\"news_enabled\":%d,\"news_rss_url\":\"%s\","
+        "\"tile_rotate_enabled\":%d,\"tile_rotate_seconds\":%d,\"tile_rotate_members\":\"%s\","
         "\"client_mode\":%d,\"master_host\":\"%s\""
         "}",
         settings.auto_dim_enabled, settings.auto_dim_seconds,
@@ -741,6 +748,13 @@ static int handle_settings_get(int fd) {
         settings.enable_domoticz, settings.domoticz_host, settings.domoticz_user,
         settings.hide_offline_tiles, settings.boot_picker_enabled,
         settings.update_check_enabled,
+        settings.ha_host, settings.life360_a_entity, settings.life360_a_name,
+        settings.life360_b_entity, settings.life360_b_name,
+        settings.curtain_entity, settings.curtain_bat_a, settings.curtain_bat_b,
+        settings.p1_elec_host, settings.p1_water_host, settings.vent_host, settings.opnsense_host,
+        settings.energy_source, settings.auto_update_enabled, settings.auto_update_hour,
+        settings.news_enabled, settings.news_rss_url,
+        settings.tile_rotate_enabled, settings.tile_rotate_seconds, settings.tile_rotate_members,
         settings.client_mode, settings.master_host);
     char hdr[160];
     int hn = snprintf(hdr, sizeof hdr,
@@ -751,7 +765,7 @@ static int handle_settings_get(int fd) {
 }
 
 static int handle_settings_post(int fd, const char * body) {
-    int iv; char sv[64];
+    int iv; char sv[256];
     if (extract_int(body, "auto_dim_enabled", &iv))   settings.auto_dim_enabled = !!iv;
     if (extract_int(body, "auto_dim_seconds", &iv))   settings.auto_dim_seconds = iv < 5 ? 5 : (iv > 300 ? 300 : iv);
     if (extract_int(body, "active_brightness", &iv))  settings.active_brightness = iv < 0 ? 0 : (iv > 1000 ? 1000 : iv);
@@ -813,6 +827,45 @@ static int handle_settings_post(int fd, const char * body) {
     if (extract_int(body, "client_mode", &iv))        settings.client_mode = !!iv;
     if (extract_str(body, "master_host", sv, sizeof sv))
         snprintf(settings.master_host, sizeof settings.master_host, "%s", sv);
+    /* Home Assistant host + Life360 + curtain entities */
+    if (extract_str(body, "ha_host", sv, sizeof sv))
+        snprintf(settings.ha_host, sizeof settings.ha_host, "%s", sv);
+    if (extract_str(body, "life360_a_entity", sv, sizeof sv))
+        snprintf(settings.life360_a_entity, sizeof settings.life360_a_entity, "%s", sv);
+    if (extract_str(body, "life360_a_name", sv, sizeof sv))
+        snprintf(settings.life360_a_name, sizeof settings.life360_a_name, "%s", sv);
+    if (extract_str(body, "life360_b_entity", sv, sizeof sv))
+        snprintf(settings.life360_b_entity, sizeof settings.life360_b_entity, "%s", sv);
+    if (extract_str(body, "life360_b_name", sv, sizeof sv))
+        snprintf(settings.life360_b_name, sizeof settings.life360_b_name, "%s", sv);
+    if (extract_str(body, "curtain_entity", sv, sizeof sv))
+        snprintf(settings.curtain_entity, sizeof settings.curtain_entity, "%s", sv);
+    if (extract_str(body, "curtain_bat_a", sv, sizeof sv))
+        snprintf(settings.curtain_bat_a, sizeof settings.curtain_bat_a, "%s", sv);
+    if (extract_str(body, "curtain_bat_b", sv, sizeof sv))
+        snprintf(settings.curtain_bat_b, sizeof settings.curtain_bat_b, "%s", sv);
+    /* Integration LAN hosts */
+    if (extract_str(body, "p1_elec_host", sv, sizeof sv))
+        snprintf(settings.p1_elec_host, sizeof settings.p1_elec_host, "%s", sv);
+    if (extract_str(body, "p1_water_host", sv, sizeof sv))
+        snprintf(settings.p1_water_host, sizeof settings.p1_water_host, "%s", sv);
+    if (extract_str(body, "vent_host", sv, sizeof sv))
+        snprintf(settings.vent_host, sizeof settings.vent_host, "%s", sv);
+    if (extract_str(body, "opnsense_host", sv, sizeof sv))
+        snprintf(settings.opnsense_host, sizeof settings.opnsense_host, "%s", sv);
+    if (extract_int(body, "energy_source", &iv))      settings.energy_source = !!iv;
+    /* Auto-update */
+    if (extract_int(body, "auto_update_enabled", &iv))settings.auto_update_enabled = !!iv;
+    if (extract_int(body, "auto_update_hour", &iv))   settings.auto_update_hour = (iv < 0 || iv > 23) ? 2 : iv;
+    /* Newsreader */
+    if (extract_int(body, "news_enabled", &iv))       settings.news_enabled = !!iv;
+    if (extract_str(body, "news_rss_url", sv, sizeof sv))
+        snprintf(settings.news_rss_url, sizeof settings.news_rss_url, "%s", sv);
+    /* Tile auto-rotate */
+    if (extract_int(body, "tile_rotate_enabled", &iv))settings.tile_rotate_enabled = !!iv;
+    if (extract_int(body, "tile_rotate_seconds", &iv))settings.tile_rotate_seconds = iv < 3 ? 3 : (iv > 120 ? 120 : iv);
+    if (extract_str(body, "tile_rotate_members", sv, sizeof sv))
+        snprintf(settings.tile_rotate_members, sizeof settings.tile_rotate_members, "%s", sv);
     settings_save();
     return send_status(fd, 200, "OK", "{\"ok\":1,\"note\":\"some changes apply after a toonui restart\"}");
 }
@@ -845,21 +898,39 @@ static const char SETTINGS_HTML[] =
 "['weather_location','City (auto-resolves id)','t'],['weather_location_id','Buienradar id (auto)','n'],"
 "['forecast_mode','Forecast (0 auto/1 hourly/2 daily)','n'],"
 "['Heating','h'],"
-"['ot_bridge_mode','OT bridge (off/proxy/wireless)','t'],['otgw_host','OTGW host','t'],"
+"['ot_bridge_mode','OT bridge (off/proxy/wireless)','t'],['otgw_host','OTGW host (ip)','t'],"
 "['MQTT','h'],"
 "['mqtt_enabled','MQTT enabled','b'],"
 "['mqtt_host','Broker host','t'],['mqtt_port','Port','n'],['mqtt_user','User','t'],"
 "['Integrations','h'],"
-"['enable_p1_elec','P1 electricity','b'],['enable_p1_water','P1 water','b'],"
-"['enable_vent','Ventilation','b'],['enable_ha','Home Assistant','b'],['enable_zwave','Z-Wave control','b'],"
+"['enable_p1_elec','P1 electricity','b'],['p1_elec_host','P1 elec host (ip)','t'],"
+"['enable_p1_water','P1 water','b'],['p1_water_host','P1 water host (ip)','t'],"
+"['energy_source','Energy src (0 meteradapter / 1 P1)','n'],"
+"['enable_vent','Ventilation','b'],['vent_host','Itho vent host (ip)','t'],"
+"['enable_zwave','Z-Wave control','b'],"
+"['opnsense_host','Router host (healthcheck, ip)','t'],"
+"['Home Assistant','h'],"
+"['enable_ha','Home Assistant enabled','b'],['ha_host','HA host (ip:port)','t'],"
+"['curtain_entity','Curtain cover entity','t'],"
+"['curtain_bat_a','Curtain battery sensor A','t'],['curtain_bat_b','Curtain battery sensor B','t'],"
+"['life360_a_entity','Person A device_tracker','t'],['life360_a_name','Person A name','t'],"
+"['life360_b_entity','Person B device_tracker','t'],['life360_b_name','Person B name','t'],"
 "['Domoticz','h'],"
 "['enable_domoticz','Domoticz enabled','b'],['domoticz_host','Domoticz host (ip:port)','t'],"
 "['domoticz_user','Domoticz user (opt)','t'],"
+"['Newsreader','h'],"
+"['news_enabled','News ticker','b'],['news_rss_url','RSS feed URL','t'],"
+"['Tile auto-rotate','h'],"
+"['tile_rotate_enabled','Rotate a tile','b'],['tile_rotate_seconds','Rotate every (s)','n'],"
+"['tile_rotate_members','Rotate members (id1,id2,..)','t'],"
+"['Updates','h'],"
+"['update_check_enabled','Update check','b'],"
+"['auto_update_enabled','Auto-update nightly','b'],['auto_update_hour','Auto-update hour (0-23)','n'],"
 "['Client mode (slave Toon / tablet)','h'],"
 "['client_mode','Client mode (mirror a master Toon)','b'],['master_host','Master Toon IP/host','t'],"
 "['Display options','h'],"
 "['vnc_enabled','VNC server','b'],['hide_offline_tiles','Hide offline tiles','b'],"
-"['boot_picker_enabled','Boot picker','b'],['update_check_enabled','Update check','b']"
+"['boot_picker_enabled','Boot picker','b']"
 "];"
 "function build(){var h='';for(var i=0;i<SCHEMA.length;i++){var s=SCHEMA[i];"
 "if(s[1]=='h'){h+='<h2>'+s[0]+'</h2>';continue;}var k=s[0],lbl=s[1],t=s[2],v=S[k];"

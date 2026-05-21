@@ -177,8 +177,8 @@ static void set_forecast_icon(lv_obj_t * cloud, lv_obj_t * sun,
 static lv_obj_t * water_spinner;
 static lv_obj_t * forecast_box;
 static lv_obj_t * lbl_forecast_city = NULL;
-static lv_obj_t * lbl_life360_ronald = NULL;
-static lv_obj_t * lbl_life360_caja   = NULL;
+static lv_obj_t * lbl_life360_a = NULL;
+static lv_obj_t * lbl_life360_b   = NULL;
 static lv_obj_t * lbl_outside_main;
 static lv_obj_t * lbl_outside_sub;
 static lv_obj_t * fc_day_lbl[WEATHER_FORECAST_DAYS];
@@ -470,6 +470,14 @@ static void do_dismiss_to_envelope(lv_event_t * e) {
     on_update_modal_close(e);
 }
 
+/* Auto-update toggle — when on, update_check.c's nightly scheduler installs
+ * a newer release around settings.auto_update_hour with a Toon notification. */
+static void on_auto_update_toggle(lv_event_t * e) {
+    lv_obj_t * sw = lv_event_get_target(e);
+    settings.auto_update_enabled = lv_obj_has_state(sw, LV_STATE_CHECKED) ? 1 : 0;
+    settings_save();
+}
+
 static void * check_thread(void * arg) { (void)arg; update_check_now(); return NULL; }
 static void do_check_updates(lv_event_t * e) {
     (void)e;
@@ -530,6 +538,13 @@ static void open_about_modal(lv_event_t * e) {
     lv_label_set_text_fmt(ver, "%s  -  beta", BUILD_VERSION);
     lv_obj_align(ver, LV_ALIGN_TOP_LEFT, 60, 34);
 
+    /* Credit + license line — alternative UI authorship and the MIT label. */
+    lv_obj_t * cred = lv_label_create(panel);
+    lv_obj_set_style_text_font(cred, &lv_font_montserrat_14, 0);
+    lv_obj_set_style_text_color(cred, lv_color_hex(0x6f8aa0), 0);
+    lv_label_set_text(cred, "alternative UI by Ierlandfan  -  MIT License");
+    lv_obj_align(cred, LV_ALIGN_TOP_RIGHT, 0, 6);
+
     /* Live status line (updated by refresh_cb while open). */
     about_status_lbl = lv_label_create(panel);
     lv_obj_set_style_text_font(about_status_lbl, &lv_font_montserrat_22, 0);
@@ -554,8 +569,33 @@ static void open_about_modal(lv_event_t * e) {
     lv_label_set_long_mode(notes, LV_LABEL_LONG_WRAP);
     lv_obj_set_width(notes, 690);
     lv_label_set_text(notes, g_update_state.release_notes[0]
-                      ? g_update_state.release_notes
-                      : "Release notes appear here after a check finds a new version.");
+        ? g_update_state.release_notes
+        : "freetoon - an independent LVGL UI for the Eneco Toon, by Ierlandfan.\n"
+          "Released under the MIT License.\n\n"
+          "Thanks to Quby / Eneco for the underlying Toon platform and the\n"
+          "BoxTalk / Quby protocol structure this UI builds on. The stock Toon\n"
+          "binaries and keteladapter firmware remain (c) Eneco / Quby and are\n"
+          "not redistributed or modified by this project.\n\n"
+          "Built with open-source components:\n"
+          "  - LVGL - embedded UI library (MIT) (c) LVGL Kft\n"
+          "  - QR-Code-generator (MIT) (c) Project Nayuki\n"
+          "  - LodePNG (zlib) (c) Lode Vandevenne\n"
+          "  - OTGW HTTP firmware (c) Robert van den Breemen\n"
+          "  - Itho-WiFi REST add-on (c) Arjen Hiemstra\n"
+          "  - HomeWizard P1, Buienradar, NOS feeds - public APIs\n\n"
+          "An update's release notes replace this text when a newer version\n"
+          "is found.");
+
+    /* Auto-update toggle — sits between the notes box and the button row. */
+    lv_obj_t * au_lbl = lv_label_create(panel);
+    lv_obj_set_style_text_font(au_lbl, &lv_font_montserrat_18, 0);
+    lv_obj_set_style_text_color(au_lbl, lv_color_hex(0xc8d4e0), 0);
+    lv_label_set_text_fmt(au_lbl, "Auto-update nightly (~%02d:00)", settings.auto_update_hour);
+    lv_obj_align(au_lbl, LV_ALIGN_TOP_LEFT, 0, 350);
+    lv_obj_t * au_sw = lv_switch_create(panel);
+    lv_obj_align(au_sw, LV_ALIGN_TOP_LEFT, 320, 344);
+    if (settings.auto_update_enabled) lv_obj_add_state(au_sw, LV_STATE_CHECKED);
+    lv_obj_add_event_cb(au_sw, on_auto_update_toggle, LV_EVENT_VALUE_CHANGED, NULL);
 
     /* Button row. */
     lv_obj_t * b_check = lv_btn_create(panel);
@@ -864,7 +904,7 @@ static void refresh_cb(lv_timer_t * t) {
     slot_active[TILE_SLOT_ENERGY] = render_tile_slot(TILE_SLOT_ENERGY,
                                                     lbl_energy_w, lbl_energy_gas);
     slot_active[TILE_SLOT_FAMILY] = render_tile_slot(TILE_SLOT_FAMILY,
-                                                    lbl_life360_ronald, lbl_life360_caja);
+                                                    lbl_life360_a, lbl_life360_b);
     slot_active[TILE_SLOT_VENT]   = render_tile_slot(TILE_SLOT_VENT,
                                                     lbl_boiler_state, lbl_boiler_pressure);
     slot_active[TILE_SLOT_WATER]  = render_tile_slot(TILE_SLOT_WATER,
@@ -1539,19 +1579,21 @@ static void refresh_cb(lv_timer_t * t) {
      * that could be mistaken for "in transit" or "out of range".
      * Skip when a marketplace integration owns this slot. */
     if (!slot_active[TILE_SLOT_FAMILY]) {
-        if (lbl_life360_ronald) {
+        if (lbl_life360_a) {
             if (!settings.enable_ha)
-                lv_label_set_text(lbl_life360_ronald, "HA offline");
+                lv_label_set_text(lbl_life360_a, "HA offline");
             else
-                lv_label_set_text_fmt(lbl_life360_ronald, "Ronald: %s",
-                    ha_state.loc_ronald[0] ? ha_state.loc_ronald : "?");
+                lv_label_set_text_fmt(lbl_life360_a, "%s: %s",
+                    settings.life360_a_name[0] ? settings.life360_a_name : "A",
+                    ha_state.loc_a[0] ? ha_state.loc_a : "?");
         }
-        if (lbl_life360_caja) {
+        if (lbl_life360_b) {
             if (!settings.enable_ha)
-                lv_label_set_text(lbl_life360_caja, "");
+                lv_label_set_text(lbl_life360_b, "");
             else
-                lv_label_set_text_fmt(lbl_life360_caja, "Caja: %s",
-                    ha_state.loc_caja[0]   ? ha_state.loc_caja   : "?");
+                lv_label_set_text_fmt(lbl_life360_b, "%s: %s",
+                    settings.life360_b_name[0] ? settings.life360_b_name : "B",
+                    ha_state.loc_b[0]   ? ha_state.loc_b   : "?");
         }
     }
 
@@ -2351,8 +2393,8 @@ lv_obj_t * screen_home_create(void) {
     lv_label_set_text(lbl_boiler_pressure, "--\n--");
     lv_obj_align(lbl_boiler_pressure, LV_ALIGN_BOTTOM_MID, 0, -38);
 
-    /* Family tile — Life360 locations for Ronald + Caja. Sits between
-     * the shrunken Energy and Water tiles in the right column. */
+    /* Family tile — Life360 locations for the two tracked people. Sits
+     * between the shrunken Energy and Water tiles in the right column. */
     tile_t family_t;
     make_tile(scr_root, 790, 160, 214, 130, "Family", 0xff8866,
               open_placeholder, &family_t);
@@ -2366,22 +2408,22 @@ lv_obj_t * screen_home_create(void) {
     /* Person 1 — blue (matches dim screen's first row colour). The two
      * scrolling labels are coloured rather than name-prefixed; the colour
      * carries the identity so the scroll has full width for the address. */
-    lbl_life360_ronald = lv_label_create(family_t.tile);
-    lv_obj_set_style_text_color(lbl_life360_ronald, lv_color_hex(0x88aaff), 0);
-    lv_obj_set_style_text_font(lbl_life360_ronald, &lv_font_montserrat_18, 0);
-    lv_obj_set_width(lbl_life360_ronald, 194);
-    lv_label_set_long_mode(lbl_life360_ronald, LV_LABEL_LONG_SCROLL_CIRCULAR);
-    lv_label_set_text(lbl_life360_ronald, "?");
-    lv_obj_align(lbl_life360_ronald, LV_ALIGN_TOP_LEFT, 0, 44);
+    lbl_life360_a = lv_label_create(family_t.tile);
+    lv_obj_set_style_text_color(lbl_life360_a, lv_color_hex(0x88aaff), 0);
+    lv_obj_set_style_text_font(lbl_life360_a, &lv_font_montserrat_18, 0);
+    lv_obj_set_width(lbl_life360_a, 194);
+    lv_label_set_long_mode(lbl_life360_a, LV_LABEL_LONG_SCROLL_CIRCULAR);
+    lv_label_set_text(lbl_life360_a, "?");
+    lv_obj_align(lbl_life360_a, LV_ALIGN_TOP_LEFT, 0, 44);
 
     /* Person 2 — pink (mirrors dim screen). */
-    lbl_life360_caja = lv_label_create(family_t.tile);
-    lv_obj_set_style_text_color(lbl_life360_caja, lv_color_hex(0xff88cc), 0);
-    lv_obj_set_style_text_font(lbl_life360_caja, &lv_font_montserrat_18, 0);
-    lv_obj_set_width(lbl_life360_caja, 194);
-    lv_label_set_long_mode(lbl_life360_caja, LV_LABEL_LONG_SCROLL_CIRCULAR);
-    lv_label_set_text(lbl_life360_caja, "?");
-    lv_obj_align(lbl_life360_caja, LV_ALIGN_TOP_LEFT, 0, 76);
+    lbl_life360_b = lv_label_create(family_t.tile);
+    lv_obj_set_style_text_color(lbl_life360_b, lv_color_hex(0xff88cc), 0);
+    lv_obj_set_style_text_font(lbl_life360_b, &lv_font_montserrat_18, 0);
+    lv_obj_set_width(lbl_life360_b, 194);
+    lv_label_set_long_mode(lbl_life360_b, LV_LABEL_LONG_SCROLL_CIRCULAR);
+    lv_label_set_text(lbl_life360_b, "?");
+    lv_obj_align(lbl_life360_b, LV_ALIGN_TOP_LEFT, 0, 76);
 
     tile_t water_t;
     make_tile(scr_root, 790, 300, 214, 130, "Water", 0x44aaff, open_placeholder, &water_t);

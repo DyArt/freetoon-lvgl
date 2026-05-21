@@ -9,6 +9,7 @@
 #include "update_check.h"
 #include "http.h"
 #include "settings.h"
+#include "notify.h"
 #include <pthread.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -146,14 +147,44 @@ void update_check_now(void) {
     }
 }
 
+/* Kick off the on-device self-installer (detached) + a Toon banner. Used by
+ * the nightly auto-update and the "Update now" button. */
+void update_install_now(void) {
+    char msg[96];
+    snprintf(msg, sizeof msg, "Updaten naar %s...",
+             g_update_state.latest_version[0] ? g_update_state.latest_version : "nieuwste versie");
+    notify_show("update", "freetoon", msg);
+    fprintf(stderr, "[update] installing now: %s\n", g_update_state.latest_version);
+    system("setsid sh -c 'sleep 2; curl -fsSL "
+           "https://raw.githubusercontent.com/Ierlandfan/freetoon-lvgl/main/scripts/toon-selfinstall.sh "
+           "| sh' >/var/volatile/tmp/selfinstall.log 2>&1 &");
+}
+
 static void * update_thread(void * arg) {
     (void)arg;
     /* Stagger the first probe by 30 s so we don't fight with boot-time
      * network setup on the Toon (wifi association can take a moment). */
     sleep(30);
+    update_check_now();
+    long last_check = (long)time(NULL);
+    int  last_auto_yday = -1;     /* so a manual reboot at the hour doesn't double-fire */
     while (1) {
-        update_check_now();
-        sleep(UPDATE_CHECK_INTERVAL_S);
+        sleep(60);                /* wake every minute to service the auto-update window */
+        long now = (long)time(NULL);
+        if (now - last_check >= UPDATE_CHECK_INTERVAL_S) {
+            update_check_now();
+            last_check = now;
+        }
+        /* Nightly auto-update: once per day, at the configured hour, if a
+         * newer release is available, install it (with a banner). */
+        if (settings.auto_update_enabled && g_update_state.available) {
+            time_t t = time(NULL); struct tm tm;
+            localtime_r(&t, &tm);
+            if (tm.tm_hour == settings.auto_update_hour && tm.tm_yday != last_auto_yday) {
+                last_auto_yday = tm.tm_yday;
+                update_install_now();
+            }
+        }
     }
     return NULL;
 }

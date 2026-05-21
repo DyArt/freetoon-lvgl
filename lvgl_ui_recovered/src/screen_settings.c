@@ -1594,7 +1594,7 @@ static int otgw_http_call(const char * method, const char * path,
                           const char * body, char * out, size_t outsz) {
     char host[80], cmd[1024], auth[160] = "";
     snprintf(host, sizeof(host), "%s", settings.otgw_host);
-    if (!host[0]) snprintf(host, sizeof(host), "192.168.99.21");
+    if (!host[0]) return -1;   /* no OTGW host configured */
     if (settings.otgw_user[0]) {
         snprintf(auth, sizeof(auth), "-u %s:%s ",
                  settings.otgw_user, settings.otgw_pass);

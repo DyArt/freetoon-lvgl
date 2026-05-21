@@ -10,6 +10,11 @@ quby_bridge/quby_bridge
 quby_bridge/qubytap
 p1bridge/p1bridge
 
+# quby_bridge debug / capture artefacts
+quby_bridge/*.cap
+quby_bridge/*.dbg
+quby_bridge/*.shim
+
 # vendor toolchain & blobs (kept out of git — huge, downloadable elsewhere)
 linaro/
 *.tar.xz

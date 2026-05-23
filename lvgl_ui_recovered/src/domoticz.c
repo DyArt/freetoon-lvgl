@@ -264,9 +264,20 @@ static int ws_connect(void) {
     return fd;
 }
 
-#define DZ_GETDEVICES \
-    "{\"event\":\"request\",\"requestid\":1,\"query\":" \
-    "\"type=command&param=getdevices&filter=light&used=true&order=Name\"}"
+
+/* Fetch the light/blind list over HTTP (the proven json.htm path — same as the
+ * Settings "test connection" button) and parse it into domoticz_state.
+ * Returns 0 on success. This is the DATA path; the WebSocket below is only used
+ * as a change-notification trigger. */
+static int http_getdevices(void) {
+    char url[320];
+    build_url(url, sizeof url,
+        "json.htm?type=command&param=getdevices&filter=light&used=true&order=Name");
+    static char body[64 * 1024];
+    if (http_fetch(url, body, sizeof body) != 0) return -1;
+    if (!strstr(body, "\"result\"")) return -1;     /* error / empty */
+    return parse_devices(body);
+}
 
 static void * dz_thread(void * arg) {
     (void)arg;
@@ -278,14 +289,24 @@ static void * dz_thread(void * arg) {
             sleep(5);
             continue;
         }
-        int fd = ws_connect();
-        if (fd < 0) { domoticz_state.connected = 0; sleep(10); continue; }
+        /* Seed the device list over HTTP — reliable, and shows devices even if
+         * the WebSocket can't connect. */
+        if (http_getdevices() == 0) domoticz_state.connected = 1;
 
-        /* Initial device list. */
-        if (ws_send(fd, 0x1, (unsigned char *)DZ_GETDEVICES, strlen(DZ_GETDEVICES)) < 0) {
-            close(fd); domoticz_state.connected = 0; sleep(10); continue;
+        /* The WebSocket is purely a push channel: Domoticz broadcasts a frame to
+         * all connected clients whenever a device changes. We don't request data
+         * over it (Domoticz's WS request/response shape is unreliable) — any
+         * inbound frame just triggers a fresh HTTP getdevices. Not a timer poll:
+         * we only re-fetch on a push (or on reconnect). */
+        int fd = ws_connect();
+        if (fd < 0) {
+            /* No WS — keep the seeded list; reconnect after a backoff (which
+             * re-seeds), so the list still refreshes without a busy poll. */
+            domoticz_state.connected = (domoticz_state.count > 0);
+            sleep(15);
+            continue;
         }
-        time_t last_ping = time(NULL);
+        time_t last_ping = time(NULL), last_fetch = time(NULL);
         for (;;) {
             fd_set rs; FD_ZERO(&rs); FD_SET(fd, &rs);
             struct timeval tv = { .tv_sec = 30, .tv_usec = 0 };
@@ -298,12 +319,11 @@ static void * dz_thread(void * arg) {
             }
             int n = ws_recv_msg(fd, msg, sizeof msg);
             if (n < 0) break;
-            if (strstr(msg, "\"result\"")) {           /* a getdevices response */
-                parse_devices(msg);
-                domoticz_state.connected = 1;
-            } else {                                   /* a change push → refresh */
-                if (ws_send(fd, 0x1, (unsigned char *)DZ_GETDEVICES,
-                            strlen(DZ_GETDEVICES)) < 0) break;
+            /* Any push = a Domoticz change → refresh over HTTP (debounced to
+             * once a second so a burst of pushes doesn't hammer the API). */
+            if (time(NULL) - last_fetch >= 1) {
+                if (http_getdevices() == 0) domoticz_state.connected = 1;
+                last_fetch = time(NULL);
             }
             if (time(NULL) - last_ping > 45) {
                 if (ws_send(fd, 0x9, NULL, 0) < 0) break;
@@ -311,7 +331,6 @@ static void * dz_thread(void * arg) {
             }
         }
         close(fd);
-        domoticz_state.connected = 0;
         sleep(3);                                      /* brief backoff, then reconnect */
     }
     return NULL;

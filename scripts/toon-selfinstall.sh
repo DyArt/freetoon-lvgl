@@ -86,10 +86,12 @@ fi
 
 step 4 "Helpers + assets installeren"
 # 2) helper scripts — always refresh. These are freetoon's own plumbing
-# (launcher, VNC, OT-mode, companion gate); they ship bug fixes (e.g. the
-# framebuffer-offset VNC fix, the firewall port-open), so a re-run of the
-# installer must update them rather than keep a stale copy.
-for s in ui_launcher.sh companion_gate.sh ot_mode_switch.sh toonvnc.sh; do
+# (launcher, VNC, OT-mode, companion gate, marketplace installer); they ship
+# bug fixes (e.g. the framebuffer-offset VNC fix, the firewall port-open), so a
+# re-run of the installer must update them rather than keep a stale copy.
+# integrations-install.sh is what the Marketplace screen runs (system()) to
+# install an integration — without it, "Install" silently does nothing.
+for s in ui_launcher.sh companion_gate.sh ot_mode_switch.sh toonvnc.sh integrations-install.sh; do
     if dl "$s" "$TMP/$s" && [ -s "$TMP/$s" ]; then
         cp "$TMP/$s" "$DEST/$s" && chmod +x "$DEST/$s"
     fi

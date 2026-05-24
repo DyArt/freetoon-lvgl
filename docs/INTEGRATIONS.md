@@ -255,7 +255,7 @@ Once merged it appears in **Settings → Marketplace** for every freetoon user.
 ## 7. Install, bind & test
 
 - **From the device UI:** Settings → **Marketplace** → tap your integration →
-  Install. (Under the hood this runs `scripts/integrations_install.sh <id>`,
+  Install. (Under the hood this runs `/mnt/data/integrations-install.sh <id>`,
   which fetches the tarball into `/mnt/data/integrations/<id>/` and adds an
   `inittab` respawn row.)
 - **Bind it to a tile:** Settings → **Tiles** → pick one of the four

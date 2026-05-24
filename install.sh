@@ -38,7 +38,7 @@ pick() {
 TOONUI_BIN="$(pick TOONUI_BIN       "$HERE/toonui"             "$HERE/lvgl_ui_recovered/build/toonui")"
 UI_LAUNCHER="$(pick UI_LAUNCHER     "$HERE/ui_launcher.sh"     "$HERE/scripts/ui_launcher.sh")"
 COMPANION_GATE="$(pick COMPANION_GATE "$HERE/companion_gate.sh" "$HERE/scripts/companion_gate.sh")"
-INTEG_INSTALLER="$(pick INTEG_INSTALLER "$HERE/integrations-install.sh" "$HERE/scripts/integrations_install.sh")"
+INTEG_INSTALLER="$(pick INTEG_INSTALLER "$HERE/integrations-install.sh" "$HERE/scripts/integrations-install.sh")"
 TOONVNC_SH="$(pick TOONVNC_SH       "$HERE/toonvnc.sh"         "$HERE/toonvnc.sh")"
 OT_MODE_SH="$(pick OT_MODE_SH       "$HERE/ot_mode_switch.sh"  "$HERE/scripts/ot_mode_switch.sh")"
 QUBY_BRIDGE_BIN="$(pick QUBY_BRIDGE_BIN "$HERE/quby_bridge"        "$HERE/quby_bridge/quby_bridge")"

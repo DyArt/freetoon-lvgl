@@ -219,8 +219,13 @@ void settings_load(void) {
         else if (strcmp(k, "tile_rotate_members") == 0)
             snprintf(settings.tile_rotate_members, sizeof settings.tile_rotate_members, "%s", v);
         else if (strcmp(k, "news_enabled")    == 0) settings.news_enabled = iv;
-        else if (strcmp(k, "news_rss_url")    == 0)
+        else if (strcmp(k, "news_rss_url")    == 0) {
             snprintf(settings.news_rss_url, sizeof settings.news_rss_url, "%s", v);
+            /* Feeds are newline-separated in memory but tab-separated on disk
+             * (a literal '\n' would split this key=value across two lines and
+             * drop every feed after the first). Decode tabs back to newlines. */
+            for (char * p = settings.news_rss_url; *p; p++) if (*p == '\t') *p = '\n';
+        }
         else if (strcmp(k, "news_scroll_speed") == 0) settings.news_scroll_speed = (iv > 0 && iv < 30) ? 30 : (iv > 150 ? 150 : iv);
         else if (strcmp(k, "auto_update_enabled") == 0) settings.auto_update_enabled = iv;
         else if (strcmp(k, "auto_update_hour")    == 0) settings.auto_update_hour = (iv < 0 || iv > 23) ? 2 : iv;
@@ -377,7 +382,15 @@ void settings_save(void) {
     fprintf(f, "tile_rotate_seconds=%d\n", settings.tile_rotate_seconds);
     fprintf(f, "tile_rotate_members=%s\n", settings.tile_rotate_members);
     fprintf(f, "news_enabled=%d\n", settings.news_enabled);
-    fprintf(f, "news_rss_url=%s\n", settings.news_rss_url);
+    /* Encode the newline-separated feed list as tabs so the whole list stays on
+     * one key=value line (a raw '\n' would split it and drop later feeds).
+     * Decoded back to newlines on load. URLs never contain tabs. */
+    {
+        char news_enc[sizeof settings.news_rss_url];
+        snprintf(news_enc, sizeof news_enc, "%s", settings.news_rss_url);
+        for (char * p = news_enc; *p; p++) if (*p == '\n') *p = '\t';
+        fprintf(f, "news_rss_url=%s\n", news_enc);
+    }
     fprintf(f, "news_scroll_speed=%d\n", settings.news_scroll_speed);
     fprintf(f, "auto_update_enabled=%d\n", settings.auto_update_enabled);
     fprintf(f, "auto_update_hour=%d\n", settings.auto_update_hour);

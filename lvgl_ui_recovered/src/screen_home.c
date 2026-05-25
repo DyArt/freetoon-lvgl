@@ -2049,6 +2049,8 @@ static void open_lights_backend(void) {
     if (settings.enable_domoticz) ui_push(screen_domoticz_create());
     else                          ui_push(screen_lights_create());
 }
+/* Click handler for the optional LT_LIGHTS grid tile (custom layout). */
+static void on_lights_tile(lv_event_t * e) { (void)e; open_lights_backend(); }
 
 /* ---- swipeable tile pages ---- */
 static void home_set_dot(int active) {
@@ -3082,6 +3084,16 @@ lv_obj_t * screen_home_create(void) {
         lv_obj_set_width(tile_cal_lbl, LV_PCT(94));
         lv_obj_align(tile_cal_lbl, LV_ALIGN_TOP_LEFT, 0, 38);
         lv_label_set_text(tile_cal_lbl, "...");
+
+        /* Lights: a placeable button tile that opens the lights screen (the same
+         * backend as the retractable side handle). Hidden until added in the editor. */
+        tile_t lt;
+        make_tile(scr_root, 0, 0, 200, 150, LT_LIGHTS, "Verlichting", 0xddaa44, on_lights_tile, &lt);
+        lv_obj_t * ll = lv_label_create(lt.tile);
+        lv_obj_set_style_text_color(ll, lv_color_hex(COL_TEXT_HI), 0);
+        lv_obj_set_style_text_font(ll, &lv_font_montserrat_28, 0);
+        lv_label_set_text(ll, "Lampen");
+        lv_obj_align(ll, LV_ALIGN_CENTER, 0, 6);
     }
     tile_water = water_t.tile;
 

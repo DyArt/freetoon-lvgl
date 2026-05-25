@@ -42,7 +42,11 @@ static lv_obj_t * chooser;      /* the "+ Tegel" size/type palette, when open */
 static lv_obj_t * rects[LAYOUT_MAX_TILES];
 static layout_t   edit;
 static int        sel = -1;
+static int        edit_page = 0;   /* which page the editor is currently editing */
 static lv_obj_t * sel_lbl;
+static lv_obj_t * page_btn;        /* toolbar page-switch button (label shows current page) */
+static void build_canvas_rects(void);   /* fwd */
+static void on_copy_p2(lv_event_t * e);  /* fwd */
 
 /* insert-palette size presets (grid units) */
 static const struct { const char * name; int w, h; } SIZES[] = {
@@ -84,7 +88,7 @@ static int would_overlap(int idx, int c, int r, int w, int h) {
     for (int j = 0; j < edit.count; j++) {
         if (j == idx) continue;
         layout_tile_t * t = &edit.tiles[j];
-        if (t->page != 0 || !t->visible) continue;
+        if (t->page != edit_page || !t->visible) continue;
         if (c < t->col + t->w && t->col < c + w &&
             r < t->row + t->h && t->row < r + h) return 1;
     }
@@ -204,7 +208,7 @@ static void place_rect(int i) {
 /* Build the draggable rect for tile i (page-0 only). */
 static void create_rect(int i) {
     layout_tile_t * t = &edit.tiles[i];
-    if (t->page != 0) { rects[i] = NULL; return; }
+    if (t->page != edit_page) { rects[i] = NULL; return; }
     lv_obj_t * r = lv_obj_create(modal);
     rects[i] = r;
     lv_obj_set_user_data(r, (void *)(intptr_t)i);
@@ -244,12 +248,12 @@ static void do_insert(int type, int w, int h) {
     int i = edit.count;
     int c, r;
     if (find_free_cell(-1, w, h, &c, &r)) {
-        edit.tiles[i] = (layout_tile_t){ .type = type, .page = 0, .col = c, .row = r,
+        edit.tiles[i] = (layout_tile_t){ .type = type, .page = edit_page, .col = c, .row = r,
                                          .w = w, .h = h, .visible = 1, .slot = -1 };
         edit.count++;
     } else {
         layout_t s = edit;
-        s.tiles[i] = (layout_tile_t){ .type = type, .page = 0, .col = 0, .row = 0,
+        s.tiles[i] = (layout_tile_t){ .type = type, .page = edit_page, .col = 0, .row = 0,
                                       .w = w, .h = h, .visible = 1, .slot = -1 };
         s.count++;
         if (!layout_reflow_push(&s, i)) {
@@ -277,7 +281,7 @@ static void populate_types(void) {
         int type = PALETTE[p];
         int present = 0;
         for (int k = 0; k < edit.count; k++)
-            if (edit.tiles[k].type == type) { present = 1; break; }
+            if (edit.tiles[k].type == type && edit.tiles[k].page == edit_page) { present = 1; break; }
         if (present) continue;
         int mw, mh; layout_type_min(type, &mw, &mh);
         if (pick_w < mw || pick_h < mh) continue;   /* too small for this content */
@@ -698,6 +702,29 @@ static void open_preset_mgr(lv_event_t * e) {
     lv_obj_set_flex_flow(preset_list, LV_FLEX_FLOW_COLUMN);
     preset_mgr_refresh();
 
+    /* Layout actions: copy page-0 shape onto page 2, and reset to default. */
+    lv_obj_t * actions = lv_obj_create(preset_mgr);
+    lv_obj_set_width(actions, LV_PCT(100));
+    lv_obj_set_height(actions, 50);
+    lv_obj_set_style_bg_opa(actions, 0, 0);
+    lv_obj_set_style_border_width(actions, 0, 0);
+    lv_obj_set_style_pad_all(actions, 2, 0);
+    lv_obj_clear_flag(actions, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_set_flex_flow(actions, LV_FLEX_FLOW_ROW);
+    lv_obj_set_style_pad_column(actions, 6, 0);
+
+    lv_obj_t * cp = lv_btn_create(actions);
+    lv_obj_set_flex_grow(cp, 1); lv_obj_set_height(cp, 44);
+    lv_obj_set_style_bg_color(cp, lv_color_hex(0x2e4e6e), 0);
+    lv_obj_add_event_cb(cp, on_copy_p2, LV_EVENT_CLICKED, NULL);
+    lv_obj_t * cpl = lv_label_create(cp); lv_label_set_text(cpl, "Kopieer pagina 1 -> 2"); lv_obj_center(cpl);
+
+    lv_obj_t * rs = lv_btn_create(actions);
+    lv_obj_set_width(rs, 150); lv_obj_set_height(rs, 44);
+    lv_obj_set_style_bg_color(rs, lv_color_hex(0x665522), 0);
+    lv_obj_add_event_cb(rs, on_reset, LV_EVENT_CLICKED, NULL);
+    lv_obj_t * rsl = lv_label_create(rs); lv_label_set_text(rsl, "Standaard"); lv_obj_center(rsl);
+
     lv_obj_t * footer = lv_obj_create(preset_mgr);
     lv_obj_set_width(footer, LV_PCT(100));
     lv_obj_set_height(footer, 50);
@@ -746,6 +773,53 @@ static lv_obj_t * tb_btn(lv_obj_t * bar, int x, int w, const char * txt,
     return b;
 }
 
+/* (Re)build the draggable rects for the tiles on the current edit_page. */
+static void build_canvas_rects(void) {
+    for (int i = 0; i < LAYOUT_MAX_TILES; i++)
+        if (rects[i]) { lv_obj_del(rects[i]); rects[i] = NULL; }
+    for (int i = 0; i < edit.count; i++) { rects[i] = NULL; create_rect(i); }
+}
+
+/* Toolbar "Pagina" — flip between editing page 1 and page 2 (0/1 internally). */
+static void on_page_toggle(lv_event_t * e) {
+    (void)e;
+    edit_page ^= 1;
+    sel = -1;
+    if (page_btn) lv_label_set_text(lv_obj_get_child(page_btn, 0),
+                                    edit_page == 0 ? "Pagina 1" : "Pagina 2");
+    build_canvas_rects();
+    lv_label_set_text_fmt(sel_lbl, "Pagina %d - tik een tegel om te selecteren", edit_page + 1);
+}
+
+/* Copy the SHAPE of page-0's visible tiles onto page 1 as generic slots (no
+ * integrations) — replaces any existing page-1 tiles. The user then assigns an
+ * integration per slot. */
+static void copy_page0_to_page1(void) {
+    int w = 0;                                   /* drop existing page-1 tiles */
+    for (int i = 0; i < edit.count; i++)
+        if (edit.tiles[i].page != 1) edit.tiles[w++] = edit.tiles[i];
+    edit.count = w;
+    int base = edit.count;
+    for (int i = 0; i < base && edit.count < LAYOUT_MAX_TILES; i++) {
+        layout_tile_t * s = &edit.tiles[i];
+        if (s->page != 0 || !s->visible) continue;
+        layout_tile_t t = *s;
+        t.page = 1; t.type = LT_SLOT; t.slot = -1; t.visible = 1;
+        edit.tiles[edit.count++] = t;
+    }
+}
+
+/* "Kopieer pagina 1 -> 2": seed page 2 from page 1's shape, then switch to it. */
+static void on_copy_p2(lv_event_t * e) {
+    (void)e;
+    copy_page0_to_page1();
+    preset_mgr_close();
+    edit_page = 1;
+    if (page_btn) lv_label_set_text(lv_obj_get_child(page_btn, 0), "Pagina 2");
+    build_canvas_rects();
+    if (sel_lbl) lv_label_set_text(sel_lbl, "Pagina 2 - gekopieerd; sleep + wijs integraties toe");
+}
+
 /* Create-style wrapper so the headless sim (render_one expects a screen) can
  * render the editor. Unused on device. */
 lv_obj_t * screen_layout_editor_create(void) {
@@ -760,6 +834,7 @@ void screen_layout_editor_show(void) {
     modal = NULL; chooser = NULL; type_grid = NULL; sel = -1;
     preset_mgr = NULL; preset_list = NULL; name_modal = NULL; name_ta = NULL;
     confirm_modal = NULL; confirm_idx = -1; suppress_release = 0;
+    edit_page = 0; page_btn = NULL;
     drag_last_col = drag_last_row = -1;
     /* Working copy; ensure we have something to edit. */
     if (g_layout.count == 0) layout_reset_default();
@@ -801,8 +876,8 @@ void screen_layout_editor_show(void) {
         lv_obj_clear_flag(ln, LV_OBJ_FLAG_CLICKABLE);
     }
 
-    /* One draggable rect per page-0 tile. */
-    for (int i = 0; i < edit.count; i++) { rects[i] = NULL; create_rect(i); }
+    /* One draggable rect per tile on the current edit page. */
+    build_canvas_rects();
 
     /* Bottom toolbar. */
     lv_obj_t * bar = lv_obj_create(modal);
@@ -817,7 +892,7 @@ void screen_layout_editor_show(void) {
     /* Widths tightened so the new "Verwijder" button fits on both 1024 and 800. */
     int x = 8;
     tb_btn(bar, x, 62, "Sluit",      on_cancel,       NULL, 0x444444); x += 68;
-    tb_btn(bar, x, 78, "Standaard",  on_reset,        NULL, 0x665522); x += 84;
+    page_btn = tb_btn(bar, x, 78, "Pagina 1", on_page_toggle, NULL, 0x4a3a6a); x += 84;
     tb_btn(bar, x, 40, "W-", on_resize, (void *)(intptr_t)0, 0x2a4060); x += 44;
     tb_btn(bar, x, 40, "W+", on_resize, (void *)(intptr_t)1, 0x2a4060); x += 44;
     tb_btn(bar, x, 40, "H-", on_resize, (void *)(intptr_t)2, 0x2a4060); x += 44;

@@ -400,6 +400,23 @@ static void on_toggle_vis(lv_event_t * e) {
     t->visible = !t->visible;
     place_rect(sel); update_sel_label();
 }
+/* Remove the selected tile entirely (not just hide it): frees its grid cell AND
+ * its type, so a smaller tile of any type can be added in its place. Keeps the
+ * parallel edit.tiles[]/rects[] arrays in sync by compacting both. */
+static void on_delete_tile(lv_event_t * e) {
+    (void)e;
+    if (sel < 0 || sel >= edit.count) return;
+    if (rects[sel]) { lv_obj_del(rects[sel]); rects[sel] = NULL; }
+    for (int k = sel; k < edit.count - 1; k++) {
+        edit.tiles[k] = edit.tiles[k + 1];
+        rects[k] = rects[k + 1];
+        if (rects[k]) lv_obj_set_user_data(rects[k], (void *)(intptr_t)k);  /* fix stored index */
+    }
+    edit.count--;
+    rects[edit.count] = NULL;
+    sel = -1;
+    update_sel_label();
+}
 static void on_reset(lv_event_t * e) {
     (void)e;
     layout_reset_default();
@@ -722,16 +739,18 @@ void screen_layout_editor_show(void) {
     lv_obj_set_style_pad_all(bar, 0, 0);
     lv_obj_clear_flag(bar, LV_OBJ_FLAG_SCROLLABLE);
 
+    /* Widths tightened so the new "Verwijder" button fits on both 1024 and 800. */
     int x = 8;
-    tb_btn(bar, x, 70, "Sluit",    on_cancel,     NULL, 0x444444); x += 78;
-    tb_btn(bar, x, 70, "Standaard",on_reset,      NULL, 0x665522); x += 78;
-    tb_btn(bar, x, 46, "W-", on_resize, (void *)(intptr_t)0, 0x2a4060); x += 50;
-    tb_btn(bar, x, 46, "W+", on_resize, (void *)(intptr_t)1, 0x2a4060); x += 50;
-    tb_btn(bar, x, 46, "H-", on_resize, (void *)(intptr_t)2, 0x2a4060); x += 50;
-    tb_btn(bar, x, 46, "H+", on_resize, (void *)(intptr_t)3, 0x2a4060); x += 54;
-    tb_btn(bar, x, 100, "Verberg/Toon", on_toggle_vis, NULL, 0x553355); x += 106;
-    tb_btn(bar, x, 78, "+ Tegel", on_add, NULL, 0x2e5e6e); x += 84;
-    tb_btn(bar, x, 96, "Indelingen", open_preset_mgr, NULL, 0x2e4e6e); x += 102;
+    tb_btn(bar, x, 62, "Sluit",      on_cancel,       NULL, 0x444444); x += 68;
+    tb_btn(bar, x, 78, "Standaard",  on_reset,        NULL, 0x665522); x += 84;
+    tb_btn(bar, x, 40, "W-", on_resize, (void *)(intptr_t)0, 0x2a4060); x += 44;
+    tb_btn(bar, x, 40, "W+", on_resize, (void *)(intptr_t)1, 0x2a4060); x += 44;
+    tb_btn(bar, x, 40, "H-", on_resize, (void *)(intptr_t)2, 0x2a4060); x += 44;
+    tb_btn(bar, x, 40, "H+", on_resize, (void *)(intptr_t)3, 0x2a4060); x += 46;
+    tb_btn(bar, x, 82, "Verberg",    on_toggle_vis,   NULL, 0x553355); x += 88;
+    tb_btn(bar, x, 84, "Verwijder",  on_delete_tile,  NULL, 0x6e2e2e); x += 90;
+    tb_btn(bar, x, 70, "+ Tegel",    on_add,          NULL, 0x2e5e6e); x += 76;
+    tb_btn(bar, x, 92, "Indelingen", open_preset_mgr, NULL, 0x2e4e6e); x += 98;
 
     sel_lbl = lv_label_create(bar);
     lv_obj_set_style_text_color(sel_lbl, lv_color_hex(0xccddee), 0);

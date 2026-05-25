@@ -191,7 +191,10 @@ static void create_rect(int i) {
     lv_obj_set_style_bg_color(r, lv_color_hex(TYPE_COL[t->type % LT_COUNT]), 0);
     lv_obj_set_style_radius(r, 10, 0);
     lv_obj_set_style_pad_all(r, 4, 0);
-    lv_obj_clear_flag(r, LV_OBJ_FLAG_SCROLLABLE);
+    /* SCROLL_CHAIN off too: without it, dragging a tile is forwarded as a scroll
+     * gesture up to the scrollable home screen behind the modal, so the whole
+     * screen scrolls along with the drag. */
+    lv_obj_clear_flag(r, LV_OBJ_FLAG_SCROLLABLE | LV_OBJ_FLAG_SCROLL_CHAIN);
     lv_obj_add_flag(r, LV_OBJ_FLAG_CLICKABLE);
     lv_obj_add_event_cb(r, rect_event, LV_EVENT_ALL, NULL);
     lv_obj_t * l = lv_label_create(r);
@@ -678,7 +681,7 @@ void screen_layout_editor_show(void) {
     lv_obj_set_style_border_width(modal, 0, 0);
     lv_obj_set_style_radius(modal, 0, 0);
     lv_obj_set_style_pad_all(modal, 0, 0);
-    lv_obj_clear_flag(modal, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_clear_flag(modal, LV_OBJ_FLAG_SCROLLABLE | LV_OBJ_FLAG_SCROLL_CHAIN);
 
     /* Faint grid backdrop so the snap cells are visible while dragging. Created
      * before the tiles (lower z) and non-interactive so it never eats drags. */

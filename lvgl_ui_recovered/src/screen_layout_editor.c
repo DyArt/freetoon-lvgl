@@ -138,6 +138,8 @@ static void select_tile(int i) {
 static int drag_last_col = -1, drag_last_row = -1;
 static layout_t drag_preview;
 static int       drag_preview_ok;
+static int       suppress_release;        /* set by long-press so RELEASE doesn't commit a drag */
+static void show_delete_confirm(int i);   /* fwd */
 
 static void rect_event(lv_event_t * e) {
     lv_event_code_t code = lv_event_get_code(e);
@@ -146,6 +148,12 @@ static void rect_event(lv_event_t * e) {
     if (code == LV_EVENT_PRESSED) {
         select_tile(i);
         drag_last_col = drag_last_row = -1;
+        suppress_release = 0;
+    } else if (code == LV_EVENT_LONG_PRESSED) {
+        /* Held in place (not dragged) → offer to delete this tile. */
+        suppress_release = 1;
+        place_rect(i);                     /* undo any tiny drag jitter */
+        show_delete_confirm(i);
     } else if (code == LV_EVENT_PRESSING) {
         lv_indev_t * in = lv_indev_get_act();
         lv_point_t v; lv_indev_get_vect(in, &v);
@@ -162,6 +170,12 @@ static void rect_event(lv_event_t * e) {
             preview_others(drag_preview_ok ? &drag_preview : &edit, i);
         }
     } else if (code == LV_EVENT_RELEASED) {
+        if (suppress_release) {            /* a long-press opened the delete dialog */
+            suppress_release = 0;
+            for (int k = 0; k < edit.count; k++) if (rects[k]) place_rect(k);
+            drag_last_col = drag_last_row = -1;
+            return;
+        }
         int col, row; snap_cell(i, &col, &row);
         layout_t res;
         if (trial_move(i, col, row, &res)) edit = res;   /* commit re-packed layout */
@@ -400,14 +414,13 @@ static void on_toggle_vis(lv_event_t * e) {
     t->visible = !t->visible;
     place_rect(sel); update_sel_label();
 }
-/* Remove the selected tile entirely (not just hide it): frees its grid cell AND
- * its type, so a smaller tile of any type can be added in its place. Keeps the
- * parallel edit.tiles[]/rects[] arrays in sync by compacting both. */
-static void on_delete_tile(lv_event_t * e) {
-    (void)e;
-    if (sel < 0 || sel >= edit.count) return;
-    if (rects[sel]) { lv_obj_del(rects[sel]); rects[sel] = NULL; }
-    for (int k = sel; k < edit.count - 1; k++) {
+/* Remove tile `i` entirely (not just hide it): frees its grid cell AND its type,
+ * so a smaller tile of any type can be added in its place. Keeps the parallel
+ * edit.tiles[]/rects[] arrays in sync by compacting both. */
+static void delete_tile(int i) {
+    if (i < 0 || i >= edit.count) return;
+    if (rects[i]) { lv_obj_del(rects[i]); rects[i] = NULL; }
+    for (int k = i; k < edit.count - 1; k++) {
         edit.tiles[k] = edit.tiles[k + 1];
         rects[k] = rects[k + 1];
         if (rects[k]) lv_obj_set_user_data(rects[k], (void *)(intptr_t)k);  /* fix stored index */
@@ -416,6 +429,61 @@ static void on_delete_tile(lv_event_t * e) {
     rects[edit.count] = NULL;
     sel = -1;
     update_sel_label();
+}
+
+/* Confirm dialog (also opened by a long-press on a tile). */
+static int        confirm_idx = -1;
+static lv_obj_t * confirm_modal;
+static void confirm_close(void) { if (confirm_modal) { lv_obj_del(confirm_modal); confirm_modal = NULL; } confirm_idx = -1; }
+static void on_confirm_cancel(lv_event_t * e) { (void)e; confirm_close(); }
+static void on_confirm_ok(lv_event_t * e) { (void)e; int i = confirm_idx; confirm_close(); delete_tile(i); }
+
+static void show_delete_confirm(int i) {
+    if (confirm_modal || i < 0 || i >= edit.count) return;
+    confirm_idx = i;
+    confirm_modal = lv_obj_create(modal);          /* full-screen input-capturing backdrop */
+    lv_obj_set_size(confirm_modal, SCR_W, SCR_H);
+    lv_obj_set_pos(confirm_modal, 0, 0);
+    lv_obj_set_style_bg_color(confirm_modal, lv_color_hex(0x000000), 0);
+    lv_obj_set_style_bg_opa(confirm_modal, LV_OPA_60, 0);
+    lv_obj_set_style_border_width(confirm_modal, 0, 0);
+    lv_obj_clear_flag(confirm_modal, LV_OBJ_FLAG_SCROLLABLE | LV_OBJ_FLAG_SCROLL_CHAIN);
+
+    lv_obj_t * card = lv_obj_create(confirm_modal);
+    lv_obj_set_size(card, SCR_W * 52 / 100, 180);
+    lv_obj_center(card);
+    lv_obj_set_style_bg_color(card, lv_color_hex(0x16263a), 0);
+    lv_obj_set_style_border_color(card, lv_color_hex(0x33506e), 0);
+    lv_obj_set_style_border_width(card, 2, 0);
+    lv_obj_set_style_radius(card, 12, 0);
+    lv_obj_clear_flag(card, LV_OBJ_FLAG_SCROLLABLE);
+
+    lv_obj_t * t = lv_label_create(card);
+    lv_obj_set_style_text_color(t, lv_color_hex(0xeaf2ff), 0);
+    lv_obj_set_style_text_font(t, &lv_font_montserrat_18, 0);
+    lv_label_set_text_fmt(t, "%s verwijderen?", layout_type_name(edit.tiles[i].type));
+    lv_obj_align(t, LV_ALIGN_TOP_MID, 0, 16);
+
+    lv_obj_t * del = lv_btn_create(card);
+    lv_obj_set_size(del, 150, 50);
+    lv_obj_align(del, LV_ALIGN_BOTTOM_RIGHT, -10, -14);
+    lv_obj_set_style_bg_color(del, lv_color_hex(0x6e2e2e), 0);
+    lv_obj_add_event_cb(del, on_confirm_ok, LV_EVENT_CLICKED, NULL);
+    lv_obj_t * dl = lv_label_create(del); lv_label_set_text(dl, "Verwijder"); lv_obj_center(dl);
+
+    lv_obj_t * ca = lv_btn_create(card);
+    lv_obj_set_size(ca, 150, 50);
+    lv_obj_align(ca, LV_ALIGN_BOTTOM_LEFT, 10, -14);
+    lv_obj_set_style_bg_color(ca, lv_color_hex(0x444444), 0);
+    lv_obj_add_event_cb(ca, on_confirm_cancel, LV_EVENT_CLICKED, NULL);
+    lv_obj_t * cal = lv_label_create(ca); lv_label_set_text(cal, "Annuleer"); lv_obj_center(cal);
+}
+
+/* Toolbar "Verwijder" — routes through the same confirm dialog as the long-press. */
+static void on_delete_tile(lv_event_t * e) {
+    (void)e;
+    if (sel < 0) { lv_label_set_text(sel_lbl, "Tik eerst een tegel"); return; }
+    show_delete_confirm(sel);
 }
 static void on_reset(lv_event_t * e) {
     (void)e;
@@ -685,6 +753,7 @@ void screen_layout_editor_show(void) {
     if (modal) lv_obj_del(modal);
     modal = NULL; chooser = NULL; type_grid = NULL; sel = -1;
     preset_mgr = NULL; preset_list = NULL; name_modal = NULL; name_ta = NULL;
+    confirm_modal = NULL; confirm_idx = -1; suppress_release = 0;
     drag_last_col = drag_last_row = -1;
     /* Working copy; ensure we have something to edit. */
     if (g_layout.count == 0) layout_reset_default();

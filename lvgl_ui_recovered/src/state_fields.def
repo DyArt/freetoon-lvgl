@@ -54,6 +54,16 @@ STATE_NUM(ha_state, lon_b,             fam_lon_b, "%.6f")
 STATE_INT(ha_state, doorbell_seq,      doorbell_seq)
 STATE_INT(ha_state, doorbell_live,     doorbell_live)
 
+/* Life360 entity-ids + display names live in `settings` (master-side config),
+ * not in `ha_state`. The map modal hides the B button entirely when
+ * settings.life360_b_entity is empty, and shows "A"/"B" instead of the user's
+ * name labels when life360_*_name is empty. Mirror all four so the WASM slave
+ * matches the master's view. */
+STATE_STR(settings, life360_a_entity,   fam_a_ent)
+STATE_STR(settings, life360_a_name,     fam_a_name)
+STATE_STR(settings, life360_b_entity,   fam_b_ent)
+STATE_STR(settings, life360_b_name,     fam_b_name)
+
 /* ---- energy: Toon's own meter (meter_state) ----------------------------- */
 STATE_INT(meter_state, connected,      meter_connected)
 STATE_NUM(meter_state, power_w,        meter_power_w, "%.1f")

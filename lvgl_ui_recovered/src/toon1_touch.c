@@ -118,16 +118,6 @@ void toon1_touch_read(lv_indev_drv_t * drv, lv_indev_data_t * data) {
     data->point.x = out_x;
     data->point.y = out_y;
     data->state   = g_pressed ? LV_INDEV_STATE_PRESSED : LV_INDEV_STATE_RELEASED;
-
-    /* Log press/release edges so the customer can `tail -f` toonui.log to see
-     * where taps actually register. Cheap (only on edges), helpful for
-     * dialling in the axis transforms. */
-    if (g_pressed != prev_pressed) {
-        fprintf(stderr, "[toon1_touch] %s at (%d,%d)%s\n",
-                g_pressed ? "PRESS" : "release", out_x, out_y,
-                (settings.touch_swap_xy || settings.touch_invert_x ||
-                 settings.touch_invert_y) ? " (transformed)" : "");
-    }
     if (g_pressed && !prev_pressed) ui_mark_activity();
 }
 

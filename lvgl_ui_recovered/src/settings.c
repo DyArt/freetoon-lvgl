@@ -343,6 +343,17 @@ autodetect:
             fclose(mf);
         }
     }
+
+    /* First boot: write the cfg now so users have an editable file even
+     * before they ever open Settings. Especially important on Toon 1 —
+     * if the resistive panel is mis-mapped, the GUI is unreachable and
+     * the only fix is to set touch_invert_y / touch_swap_xy in the cfg
+     * over SSH. With no file there, the user has to invent the key names
+     * from memory. autodetect + mqtt migration run before this so the
+     * persisted values reflect the right post-detect defaults. */
+    if (!cfg_existed) {
+        settings_save();
+    }
 }
 
 /* Strip control characters (< 0x20: newline, CR, tab, etc.) in place. Keeps

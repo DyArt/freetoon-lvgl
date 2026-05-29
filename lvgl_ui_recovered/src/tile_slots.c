@@ -297,7 +297,18 @@ int tile_slots_init(void) {
  * doesn't persist subscriptions across a socket drop. */
 void tile_slots_subscribe_all(void) {
     for (int i = 0; i < g_integ_count; i++) {
-        if (g_integ[i].service_id[0])
-            boxtalk_subscribe_service(g_integ[i].service_id);
+        if (g_integ[i].service_id[0]) {
+            /* Subscribe with the FULL serviceId URN, like every built-in service
+             * (boxtalk.c subscribes TemperatureSensor/BoilerInfo/… as
+             * "urn:hcb-hae-com:serviceId:<name>"). The broker routes notifies by
+             * exact serviceid, and providers publish the URN form
+             * (urn:hcb-hae-com:serviceId:cryptoTicker), so a bare-id subscription
+             * never matched -> the notify was never delivered and the tile stayed
+             * empty. handle_notify still matches the manifest by stripped tail. */
+            char urn[INTEG_SERVICE_MAX + 32];
+            snprintf(urn, sizeof urn, "urn:hcb-hae-com:serviceId:%s",
+                     g_integ[i].service_id);
+            boxtalk_subscribe_service(urn);
+        }
     }
 }

@@ -22,13 +22,24 @@ EOF
     exit 1
 fi
 
+JOBS="$(nproc 2>/dev/null || echo 4)"
+
+# Toon 2 layout (1024x600) — the default bundle, served at /ui/.
 rm -rf build
 emcmake cmake -B build -DCMAKE_BUILD_TYPE=Release .
-emmake make -C build -j"$(nproc 2>/dev/null || echo 4)"
+emmake make -C build -j"$JOBS"
+
+# Toon 1 layout (800x480) — preview/test the native small-panel layout in a
+# browser. Served at /ui-toon1/ (or open build-toon1/index.html locally).
+rm -rf build-toon1
+emcmake cmake -B build-toon1 -DCMAKE_BUILD_TYPE=Release -DTOON1=ON .
+emmake make -C build-toon1 -j"$JOBS"
 
 echo
 echo "Built:"
-ls -lh build/index.html build/index.wasm build/index.js 2>/dev/null
+echo "  Toon 2 (1024x600):"; ls -lh build/index.html build/index.wasm build/index.js 2>/dev/null
+echo "  Toon 1 (800x480):";  ls -lh build-toon1/index.html build-toon1/index.wasm build-toon1/index.js 2>/dev/null
 echo
 echo "Quick local test:    cd build && python3 -m http.server 8080  →  http://localhost:8080/index.html"
-echo "Deploy to the Toon:  scp build/index.{html,wasm,js} root@<toon>:/mnt/data/pwa/ui/"
+echo "Deploy Toon 2 PWA:   scp build/index.{html,wasm,js}       root@<toon>:/mnt/data/pwa/ui/"
+echo "Deploy Toon 1 PWA:   scp build-toon1/index.{html,wasm,js} root@<toon>:/mnt/data/pwa/ui-toon1/"

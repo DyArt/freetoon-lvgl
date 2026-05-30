@@ -2667,12 +2667,17 @@ lv_obj_t * screen_home_create(void) {
      * snap to grid edges, looking shrunk + misaligned (BUG 5). The internals are
      * absolutely positioned/centred, so a larger box just gives them more room;
      * SCROLLABLE is cleared below so any overflow is clipped, not scrolled. */
+    int clock_dx = 0;   /* shift the clock right of the "ft" logo when needed */
     if (settings.custom_layout_enabled) {
         const layout_tile_t * L = layout_find(LT_THERMOSTAT);
         if (L && L->visible) { int x, y, w, h;
             layout_cell_px(L->col, L->row, L->w, L->h, &x, &y, &w, &h);
             lv_obj_set_pos(th, x, y);
             lv_obj_set_size(th, w, h);
+            /* The "ft" logo badge is a fixed 40px box at screen (8,6). A custom
+             * layout can place the thermostat at the top-left corner, putting the
+             * clock behind the badge — shift it right to clear it. (pad_all=20.) */
+            if (y < 46 && x + 20 < 54) clock_dx = 54 - (x + 20);
         } else if (L) {
             lv_obj_add_flag(th, LV_OBJ_FLAG_HIDDEN);
         }
@@ -2689,7 +2694,7 @@ lv_obj_t * screen_home_create(void) {
     lv_obj_set_style_text_color(lbl_t_clock, lv_color_hex(COL_TEXT_HI), 0);
     lv_obj_set_style_text_font(lbl_t_clock, SF(28), 0);
     lv_label_set_text(lbl_t_clock, "--:--");
-    lv_obj_align(lbl_t_clock, LV_ALIGN_TOP_LEFT, 0, 0);
+    lv_obj_align(lbl_t_clock, LV_ALIGN_TOP_LEFT, clock_dx, 0);
 
     /* Date directly under the clock so the top-left corner is a full
        date+time block. */

@@ -67,21 +67,25 @@
     const setStatus = (s) => { statusEl.textContent = s; };
 
     // ─── responsive canvas sizing ────────────────────────────────────────────
-    // The LVGL framebuffer is a fixed 1024x600; we only scale its DISPLAY size.
-    // We size against window.visualViewport (the real visible area) rather than
-    // CSS 100vw/100vh, because on mobile — especially landscape with the URL bar
-    // — those units overshoot the visible region and the canvas spilled off the
-    // bottom / mis-centred. Largest 1024:600 box that fits, never above native.
-    const AR = 1024 / 600;
+    // We only scale the canvas DISPLAY size; the LVGL framebuffer is fixed by
+    // the build (1024x600 for the Toon 2 layout, 800x480 for the Toon 1 one).
+    // Read the native size from the canvas drawing buffer (canvas.width/height,
+    // which SDL sets to the LVGL resolution) so this one shell works for either
+    // bundle. Size against window.visualViewport (the real visible area) rather
+    // than CSS 100vw/100vh — on mobile, especially landscape with the URL bar,
+    // those units overshoot and the canvas spilled off-screen / mis-centred.
     function fitCanvas() {
         const c = document.getElementById('canvas');
         if (!c) return;
+        const NW = c.width  || 1024;           // native framebuffer = SDL/LVGL res
+        const NH = c.height ||  600;
+        const AR = NW / NH;
         const vp = window.visualViewport;
         const vw = Math.round(vp ? vp.width  : window.innerWidth);
         const vh = Math.round(vp ? vp.height : window.innerHeight);
-        let w = Math.min(vw, 1024, vh * AR);   // fit width + native cap + height-bound via ratio
+        let w = Math.min(vw, NW, vh * AR);     // fit width + native cap + height-bound via ratio
         let h = w / AR;
-        if (h > vh) { h = Math.min(vh, 600); w = h * AR; }  // re-clamp if height was the limit
+        if (h > vh) { h = Math.min(vh, NH); w = h * AR; }  // re-clamp if height was the limit
         c.style.width  = Math.round(w) + 'px';
         c.style.height = Math.round(h) + 'px';
     }

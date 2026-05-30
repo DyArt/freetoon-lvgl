@@ -41,8 +41,16 @@ extern void ui_idle_tick(void);
  * One SDL_Window + Renderer + Texture; flush callback updates a sub-rect of
  * the texture and re-presents. Input: poll SDL_Event in the main loop and
  * publish mouse/touch state for LVGL's pointer driver to pick up. */
+/* Panel resolution. Default is the Toon 2 design size (1024x600); the Toon 1
+ * variant is built with -DTOON1 and renders the native 800x480 layout. These
+ * match DISP_HOR/DISP_VER in display.h for the corresponding target. */
+#ifdef TOON1
+#define LV_HOR_RES 800
+#define LV_VER_RES 480
+#else
 #define LV_HOR_RES 1024
 #define LV_VER_RES 600
+#endif
 
 static SDL_Window   * g_win;
 static SDL_Renderer * g_ren;

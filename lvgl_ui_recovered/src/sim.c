@@ -41,7 +41,19 @@ static void dump_ppm(const char * path) {
     if (!f) { perror("ppm"); return; }
     fprintf(f, "P6\n%d %d\n255\n", DISP_HOR, DISP_VER);
     for (int i = 0; i < DISP_HOR * DISP_VER; i++) {
+#if LV_COLOR_DEPTH == 16
+        /* RGB565: channels are 5/6/5-bit. Scale up to full 8-bit (replicate
+           the high bits into the low ones) so the PPM isn't a dark cast of
+           the real RGB565 device output. */
+        unsigned r5 = fb[i].ch.red, g6 = fb[i].ch.green, b5 = fb[i].ch.blue;
+        unsigned char rgb[3] = {
+            (unsigned char)((r5 << 3) | (r5 >> 2)),
+            (unsigned char)((g6 << 2) | (g6 >> 4)),
+            (unsigned char)((b5 << 3) | (b5 >> 2)),
+        };
+#else
         unsigned char rgb[3] = { fb[i].ch.red, fb[i].ch.green, fb[i].ch.blue };
+#endif
         fwrite(rgb, 1, 3, f);
     }
     fclose(f);

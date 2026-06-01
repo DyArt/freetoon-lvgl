@@ -76,6 +76,16 @@ exec_qtgui() {
 #     when video isn't set up, so nothing is exposed on a plain install.
 toon1_video_prep() {
     is_toon1 || return 0
+    # Reap a warm vpu_stream decoder orphaned by a previous toonui that
+    # _exit(0)'d (UI restart) or crashed — toonui never runs video_shutdown on
+    # those paths, so without this the next toonui spawns a second decoder and
+    # the two fight over the single VPU. Runs before any UI starts, so the only
+    # vpu_stream around here is a straggler.
+    vpu_pids=$(pidof vpu_stream 2>/dev/null || true)
+    if [ -n "${vpu_pids:-}" ]; then
+        kill $vpu_pids 2>/dev/null || true
+        log "reaped stale vpu_stream ($vpu_pids)"
+    fi
     if command -v fbset >/dev/null 2>&1; then
         fbset -fb /dev/fb0 -depth 16 2>/dev/null || true
         [ -e /dev/fb1 ] && { fbset -fb /dev/fb1 -depth 16 2>/dev/null || true; }
@@ -131,6 +141,12 @@ TOONLOG=/var/volatile/tmp/toonui.log
 VNCLOG=/var/volatile/tmp/x11vnc.log
 (
     set +e   # a stray failure must never kill the watchdog
+    # Background the sleep + wait on it, and TERM-trap to kill it, so the
+    # stale-kill above (next launcher run) reaps the whole watchdog instead of
+    # orphaning a lingering `sleep 120` for up to two minutes.
+    sp=
+    # Guard the empty case: `kill 0` would signal the whole process group.
+    trap '[ -n "$sp" ] && kill "$sp" 2>/dev/null; exit 0' TERM INT
     while :; do
         for f in "$TOONLOG" "$LOG" "$VNCLOG"; do
             [ -f "$f" ] || continue
@@ -140,7 +156,8 @@ VNCLOG=/var/volatile/tmp/x11vnc.log
                 : > "$f"                              # truncate in place
             fi
         done
-        sleep 120
+        sleep 120 & sp=$!
+        wait "$sp"
     done
 ) >/dev/null 2>&1 &
     echo $! > "$LOGROT_PIDFILE"

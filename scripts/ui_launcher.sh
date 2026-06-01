@@ -20,6 +20,10 @@ TOONUI=/mnt/data/toonui
 QTGUI=/qmf/sbin/qt-gui
 STARTQT=/usr/bin/startqt
 LOG=/var/volatile/tmp/ui_launcher.log
+# Dropped by toonui (ui_request_restart) right before an intentional _exit(0)
+# — a layout-editor Save/preset/reset or Settings "Restart UI". Tells the
+# crash-loop guard below this relaunch is deliberate, not a crash.
+RESTART_MARK=/var/volatile/tmp/toonui_restart
 
 log() { echo "$(date '+%F %T') $*" >> "$LOG"; }
 
@@ -142,6 +146,14 @@ last=0; fails=0
 [ -n "$last" ]  || last=0
 [ -n "$fails" ] || fails=0
 [ $((now - last)) -ge "$FAIL_WINDOW" ] && fails=0    # healthy gap → reset
+# An intentional restart (toonui dropped RESTART_MARK before _exit) is not a
+# crash: consume the marker and clear the counter so editor Save / settings
+# "Restart UI" round-trips never trip the qt-gui fallback.
+if [ -f "$RESTART_MARK" ]; then
+    rm -f "$RESTART_MARK"
+    fails=0
+    log "intentional UI restart (marker) — crash counter reset"
+fi
 if [ "$fails" -ge "$FAIL_LIMIT" ] && have_qtgui && [ "$CHOICE" != "qt-gui" ]; then
     log "toonui crash-looped ($fails fast exits) → forcing qt-gui fallback"
     : > "$FAILF"     # reset so a later manual switch back to freetoon works

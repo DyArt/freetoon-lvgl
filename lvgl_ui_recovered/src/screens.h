@@ -9,6 +9,7 @@
 
 void ui_push(lv_obj_t * scr);
 void ui_pop(void);
+void ui_request_restart(void);   /* clean _exit(0) restart; drops the launcher crash-guard marker */
 
 /* Per-screen builders. Each returns a freshly created screen object. */
 lv_obj_t * screen_home_create(void);

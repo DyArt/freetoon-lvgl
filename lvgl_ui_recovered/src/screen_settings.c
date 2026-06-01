@@ -1091,8 +1091,7 @@ static void on_restart_yes(lv_event_t * e) {
     (void)e;
     settings_save();
     fprintf(stderr, "[settings] user requested UI restart — exiting\n");
-    fflush(NULL);
-    _exit(0);
+    ui_request_restart();
 }
 static void open_restart_confirm(lv_event_t * e) {
     (void)e;

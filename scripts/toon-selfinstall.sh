@@ -134,24 +134,16 @@ if [ ! -x /usr/bin/x11vnc ] && ! which x11vnc >/dev/null 2>&1 \
     fi
 fi
 
-# 2d) PWA static assets — the phone web UI + settings page that pwa_server
-# serves on :10081. The API/settings endpoints work without these, but the
-# installable app at "/" 404s until index.html/app.js/etc. exist under
-# /mnt/data/pwa. Shipped as a tarball; always refresh so app updates land.
-if dl pwa.tgz "$TMP/pwa.tgz" \
-   && [ "$(wc -c < "$TMP/pwa.tgz" 2>/dev/null || echo 0)" -gt 1000 ]; then
-    mkdir -p "$DEST/pwa"
-    if tar xzf "$TMP/pwa.tgz" -C "$DEST/pwa" 2>/dev/null; then
-        say "installed PWA assets -> $DEST/pwa"
-    fi
-fi
+# 2d) (removed) — there is no separate simple-app / settings HTML page on
+# :10081 anymore. The sole frontend is the WASM slave UI installed under
+# /mnt/data/pwa/ui/ in step 2d2; pwa_server 302-redirects "/" to "/ui/".
 
-# 2d2) freetoon-WASM bundle — the full LVGL UI compiled to WebAssembly. When
-# present in the release, pwa_server serves it at http://<toon>:10081/ui/ as
-# a same-origin slave of the master Toon's /api/state/stream. Any browser on
-# the LAN (phone / tablet / laptop) opens the URL → full UI, no install.
-# Optional asset: a release without these three files leaves /ui/ a 404,
-# which is fine — the rest of the UI is unaffected.
+# 2d2) freetoon-WASM bundle — the full LVGL UI compiled to WebAssembly, and the
+# ONLY frontend pwa_server serves on :10081. Installed at /mnt/data/pwa/ui/ and
+# reached at http://<toon>:10081/ (302→/ui/) as a same-origin slave of the
+# master Toon's /api/state/stream. Any browser on the LAN (phone / tablet /
+# laptop) opens the URL → full UI, no install. If a release ships without these
+# three files, "/" → /ui/ → 404 until they are present.
 mkdir -p "$DEST/pwa/ui"
 for f in index.html index.wasm index.js; do
     if dl "$f" "$TMP/wasm_$f" 2>/dev/null \
@@ -160,6 +152,22 @@ for f in index.html index.wasm index.js; do
         say "installed WASM bundle file -> $DEST/pwa/ui/$f ($(wc -c < $DEST/pwa/ui/$f) B)"
     fi
 done
+
+# 2d3) Retire the old simple-app / settings-page assets that earlier releases
+# dropped at the pwa ROOT. pwa_server now serves ONLY the WASM UI under /ui/
+# (bare "/" 302-redirects there), so these are dead files — remove them so an
+# upgraded device doesn't keep serving stale JS or waste flash. ONLY do this
+# once the WASM bundle is actually present under /ui/, so we never strip the
+# root without a working replacement in place.
+if [ -s "$DEST/pwa/ui/index.wasm" ]; then
+    for stale in app.js sw.js manifest.json icon-192.png \
+                 index.html index.js index.wasm \
+                 index.html.bak index.html.staticbak \
+                 index.js.bak index.wasm.bak; do
+        [ -e "$DEST/pwa/$stale" ] && rm -f "$DEST/pwa/$stale" \
+            && say "removed obsolete pwa asset -> $DEST/pwa/$stale"
+    done
+fi
 
 # 2e) Open the PWA (10081) + VNC (5900) ports in the stock Toon firewall. The
 # HCB-INPUT chain in /etc/default/iptables.conf accepts only 22/80 and drops

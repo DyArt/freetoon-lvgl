@@ -1,14 +1,15 @@
 /*
- * boxtalk_mirror — dev-side injector: mirror a MASTER Toon's BoxTalk data onto
- * THIS (dev) Toon's local bus, so the dev's STOCK qt-gui renders the master's
- * data. No freetoon UI here; runs alongside stock qt-gui.
+ * boxtalk_mirror — make THIS (dev) Toon a full two-way remote screen of a MASTER
+ * Toon: the dev's STOCK qt-gui shows the master's data AND its controls drive the
+ * master. No freetoon UI here; runs alongside stock qt-gui.
  *
- *   master bus ──(authenticated tunnel, boxtalk_proxy on the master)──► us
- *        │ we SUBSCRIBE (push, no polling)
- *        ▼ for each frame: rewrite the master's device-UUID base → the dev's
- *   dev bus 127.0.0.1:1337 ◄── we PUBLISH the rewritten notify (quby_bridge
- *        │ pattern: declare devices in an ssdp handshake, then <notify…>)
- *        ▼ stock qt-gui (subscriber) shows the master's values.
+ * Bidirectional UUID-rewriting BoxTalk bridge (push both ways, no polling):
+ *   DOWN  master notify/data ─tunnel→ rewrite master→dev → publish on dev bus
+ *         → stock qt-gui shows it (we lazily register the impersonated devices).
+ *   UP    qt-gui control invoke (SetSetpoint/ChangeSchemeState aimed at our
+ *         impersonated qb-<dev>:happ_thermstat) → rewrite dev→master → forward
+ *         to the master's REAL happ_thermstat, which executes it; the new state
+ *         + the response flow back DOWN. So you can set/change everything.
  *
  * The dev's own data daemons MUST be stopped (full-stop) so they don't fight
  * the mirror — see boxtalk_mirror_mute.sh.
@@ -29,6 +30,7 @@
 #include <sys/socket.h>
 #include <netinet/in.h>
 #include <arpa/inet.h>
+#include <sys/select.h>
 
 #define BUS_HOST "127.0.0.1"
 #define BUS_PORT 1337
@@ -214,6 +216,61 @@ static int wanted(const char *frame) {
     return strstr(frame, "ThermostatInfo") != NULL;
 }
 
+#define DIR_DOWN 0   /* master -> dev: data + responses */
+#define DIR_UP   1   /* dev (qt-gui) -> master: control invokes */
+static char g_out[16384];
+
+/* Process one complete frame. from/to = UUID bases to rewrite for this
+ * direction; wfd = where the rewritten frame goes. */
+static void handle_frame(const char *frame, int wfd,
+                         const char *from, const char *to, int dir) {
+    if (dir == DIR_DOWN) {
+        int data = strstr(frame, "<notify") || strstr(frame, "UpdateDataSet");
+        int resp = strstr(frame, "class=\"response\"") != NULL;
+        if (!data && !resp) return;                 /* skip greeting/discovery/handshake */
+        if (data && !wanted(frame)) return;         /* thermostat-first / all filter */
+        rewrite(frame, from, to, g_out, sizeof g_out);
+        if (data) {                                 /* declare the device, then publish */
+            char du[96], sid[96], svc[64];
+            if (attr(g_out, "uuid", du, sizeof du) == 0) {
+                const char *c = (attr(g_out, "serviceid", sid, sizeof sid) == 0)
+                                ? strrchr(sid, ':') : NULL;
+                snprintf(svc, sizeof svc, "%s", c ? c + 1 : "ThermostatInfo");
+                ensure_registered(wfd, du, svc);
+            }
+        }
+        send_frame(wfd, g_out);
+    } else {                                        /* DIR_UP */
+        /* qt-gui's control commands: an invoke aimed at one of our impersonated
+         * (dev-base) devices. Rewrite dev->master and drive the master. We do NOT
+         * forward our own notifies/discovery back up (avoids a loop). */
+        if (!strstr(frame, "class=\"invoke\"")) return;
+        if (!strstr(frame, from)) return;           /* must target our dev base */
+        rewrite(frame, from, to, g_out, sizeof g_out);
+        send_frame(wfd, g_out);
+        fprintf(stderr, "[mirror] control up: %.90s\n", g_out);
+    }
+}
+
+/* recv once on rfd, dispatch every complete NUL-framed message via handle_frame.
+ * Returns -1 on EOF/error. */
+typedef struct { char b[16384]; int n; } fbuf_t;
+static int pump(int rfd, fbuf_t *fb, int wfd, const char *from, const char *to, int dir) {
+    int k = recv(rfd, fb->b + fb->n, (int)sizeof(fb->b) - fb->n - 1, 0);
+    if (k <= 0) return -1;
+    fb->n += k;
+    int start = 0;
+    for (int i = 0; i < fb->n; i++) {
+        if (fb->b[i] != 0) continue;
+        fb->b[i] = 0;
+        handle_frame(fb->b + start, wfd, from, to, dir);
+        start = i + 1;
+    }
+    if (start > 0) { memmove(fb->b, fb->b + start, fb->n - start); fb->n -= start; }
+    if (fb->n >= (int)sizeof(fb->b) - 1) fb->n = 0;     /* overflow guard: drop partial */
+    return 0;
+}
+
 int main(int argc, char **argv) {
     if (argc == 2 && strcmp(argv[1], "--selftest") == 0) {
         const char *greet =
@@ -249,7 +306,7 @@ int main(int argc, char **argv) {
         int dn = tcp_connect(BUS_HOST, BUS_PORT);
         if (dn < 0) { close(up); sleep(5); continue; }
 
-        static char fr[8192], out[8192];
+        static char fr[8192];
         /* learn the master base from its greeting (first frames) */
         int tries = 0;
         while (g_master_base[0] == 0 && tries++ < 8) {
@@ -280,20 +337,20 @@ int main(int argc, char **argv) {
         snprintf(mfrom, sizeof mfrom, "qb-%s", g_master_base);
         snprintf(dto,   sizeof dto,   "qb-%s", g_dev_base);
 
-        for (;;) {                               /* relay */
-            int n = read_frame(up, fr, sizeof fr);
-            if (n <= 0) { fprintf(stderr, "[mirror] upstream closed, reconnecting\n"); break; }
-            if (!wanted(fr)) continue;
-            rewrite(fr, mfrom, dto, out, sizeof out);
-            /* lazily declare the (rewritten) device before publishing its data */
-            char du[96], sid[96], svc[64];
-            if (attr(out, "uuid", du, sizeof du) == 0) {
-                const char *c = (attr(out, "serviceid", sid, sizeof sid) == 0)
-                                ? strrchr(sid, ':') : NULL;
-                snprintf(svc, sizeof svc, "%s", c ? c+1 : "ThermostatInfo");
-                ensure_registered(dn, du, svc);
+        /* Bidirectional relay: master DATA flows DOWN to the dev's qt-gui;
+         * qt-gui's CONTROL invokes flow UP to the master's real happ_thermstat
+         * (and its responses come back down). */
+        fbuf_t ub = {0}, db = {0};
+        int mx = (up > dn ? up : dn) + 1;
+        for (;;) {
+            fd_set rf; FD_ZERO(&rf); FD_SET(up, &rf); FD_SET(dn, &rf);
+            if (select(mx, &rf, NULL, NULL, NULL) < 0) { if (errno == EINTR) continue; break; }
+            if (FD_ISSET(up, &rf) && pump(up, &ub, dn, mfrom, dto, DIR_DOWN) < 0) {
+                fprintf(stderr, "[mirror] master link closed, reconnecting\n"); break;
             }
-            if (send_frame(dn, out) != 0) { fprintf(stderr, "[mirror] dev bus closed\n"); break; }
+            if (FD_ISSET(dn, &rf) && pump(dn, &db, up, dto, mfrom, DIR_UP) < 0) {
+                fprintf(stderr, "[mirror] dev bus closed, reconnecting\n"); break;
+            }
         }
         close(up); close(dn); sleep(3);
     }

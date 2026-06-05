@@ -180,10 +180,10 @@ static int attr(const char *frame, const char *name, char *out, int outsz) {
 static void downstream_connect(int fd) {
     char b[512]; long now=(long)time(NULL); int pid=(int)getpid();
     snprintf(b, sizeof b,
-        "<discovery nts=\"ssdp:connect\" uuid=\"qb-%s:boxtalk_mirror\" "
+        "<discovery nts=\"ssdp:connect\" uuid=\"boxtalk_mirror-%d\" "
         "type=\"urn:schemas-hcb-hae-com:device:keteladapter\" version=\"v\" "
         "xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\" sessionKey=\"%d-%ld\"></discovery>",
-        g_dev_base, pid, now);
+        pid, pid, now);
     send_frame(fd, b);
 }
 
@@ -291,6 +291,7 @@ int main(int argc, char **argv) {
              !strstr(out,"659918000101")) ? "OK" : "FAIL");
         return 0;
     }
+    setvbuf(stderr, NULL, _IONBF, 0);   /* unbuffered so logs flush even to a file */
     if (argc < 5) {
         fprintf(stderr, "usage: %s <master_host> <proxy_port> <user> <pass> [thermostat|all]\n", argv[0]);
         return 2;
@@ -301,22 +302,28 @@ int main(int argc, char **argv) {
     signal(SIGPIPE, SIG_IGN);
 
     for (;;) {                                   /* reconnect loop */
+        fprintf(stderr, "[mirror] connecting to master proxy %s:%d...\n", g_master_host, g_proxy_port);
         int up = proxy_open();
-        if (up < 0) { sleep(5); continue; }
+        if (up < 0) { fprintf(stderr, "[mirror] proxy connect/auth failed\n"); sleep(5); continue; }
+        fprintf(stderr, "[mirror] master proxy tunnel OPEN\n");
         int dn = tcp_connect(BUS_HOST, BUS_PORT);
-        if (dn < 0) { close(up); sleep(5); continue; }
+        if (dn < 0) { fprintf(stderr, "[mirror] local bus connect failed\n"); close(up); sleep(5); continue; }
+        fprintf(stderr, "[mirror] local dev bus connected\n");
 
         static char fr[8192];
-        /* learn the master base from its greeting (first frames) */
+        /* Each bus sends only a banner on connect, then waits for our handshake
+         * before emitting the ssdp:alive frames that carry the UUID. So we MUST
+         * handshake first, then read to learn the base. */
+        upstream_subscribe(up);
         int tries = 0;
-        while (g_master_base[0] == 0 && tries++ < 8) {
+        while (g_master_base[0] == 0 && tries++ < 12) {
             int n = read_frame(up, fr, sizeof fr);
             if (n <= 0) break;
             detect_base(fr, g_master_base, sizeof g_master_base);
         }
-        /* learn the dev base from the local bus greeting */
+        downstream_connect(dn);
         tries = 0;
-        while (g_dev_base[0] == 0 && tries++ < 8) {
+        while (g_dev_base[0] == 0 && tries++ < 12) {
             int n = read_frame(dn, fr, sizeof fr);
             if (n <= 0) break;
             detect_base(fr, g_dev_base, sizeof g_dev_base);
@@ -328,9 +335,6 @@ int main(int argc, char **argv) {
         }
         fprintf(stderr, "[mirror] master=qb-%s  dev=qb-%s  filter=%s\n",
                 g_master_base, g_dev_base, g_filter);
-
-        upstream_subscribe(up);
-        downstream_connect(dn);
         g_nreg = 0;                              /* fresh registrations per connection */
 
         char mfrom[112], dto[112];

@@ -90,6 +90,10 @@ static void mock_state(void) {
     toon_state.dhw_on        = 0;
     toon_state.program_state = 2;   /* scheme mode = TEMPOVERRIDE */
     toon_state.active_state  = 1;   /* live comfort preset = Home */
+    /* Sim-only: SIM_MANUAL=1 emulates manual hold — happ reports programState=0
+     * (PROG_MANUAL) yet activeState still names the value-matching preset, so we
+     * can verify no preset/program highlight leaks through in manual mode. */
+    if (getenv("SIM_MANUAL")) { toon_state.program_state = 0; toon_state.active_state = 0; }
 
     weather_state.connected   = 1;
     weather_state.current_temp = 22.6f;

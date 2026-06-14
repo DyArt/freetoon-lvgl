@@ -40,6 +40,7 @@ typedef struct {
 
 /* Human-readable label for the effective current mode (handles manual override). */
 const char* program_label(void);
+int  boxtalk_manual_hold(void);
 
 /* Classify air quality from CO2 (ppm) + TVOC (ppb). Returns an empty
  * string if neither input is valid. Buckets:

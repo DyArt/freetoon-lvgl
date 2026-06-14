@@ -94,6 +94,9 @@ const char* program_label(void) {
      * name, or "Manual" when off the schedule. The home tile renders
      * the override-aware "(temp)" hint via its own logic next to the
      * mode-toggle button instead of bolting it onto this label. */
+    /* programState == 0 (PROG_MANUAL) is manual hold — happ reports activeState
+     * as the value-matching preset, but the user is NOT on a preset. Say so. */
+    if (toon_state.program_state == 0) return "Manual";
     int origin = -1;
     if (temp_override_active && temp_override_origin >= 0 &&
                                 temp_override_origin <= 3)

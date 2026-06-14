@@ -1446,7 +1446,13 @@ static void refresh_cb(lv_timer_t * t) {
      * daemon is parked at active_state=-1 server-side but the override
      * tick will swing it back, so the UI shouldn't pretend we're in Manual. */
     int temp_origin = boxtalk_temp_override_origin();   /* -1 if none */
-    int on_schedule = (toon_state.active_state >= 0) || (temp_origin >= 0);
+    /* programState == 0 (PROG_MANUAL) is the authoritative "manual hold" flag.
+     * In manual mode happ still reports activeState as the preset whose stored
+     * value equals the held setpoint, so keying off active_state alone made the
+     * UI highlight that preset. Manual must clear all preset/program highlight. */
+    int is_manual   = (toon_state.program_state == 0);   /* PROG_MANUAL */
+    int on_schedule = !is_manual &&
+                      ((toon_state.active_state >= 0) || (temp_origin >= 0));
 
     if (tile_btn_mode_manual)
         lv_obj_set_style_border_width(tile_btn_mode_manual,

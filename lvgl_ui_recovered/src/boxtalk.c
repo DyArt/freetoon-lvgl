@@ -37,6 +37,13 @@ toon_state_t toon_state = { .program_state = -1, .active_state = -1,
  * the declarations live up here. See note_temp_override() for semantics. */
 static int temp_override_active = 0;
 static int temp_override_origin = -1;   /* program at moment of override */
+/* Whether the user is on a MANUAL hold (Manual button) vs a preset/schedule.
+ * happ's programState==0 means "manual" only on a Toon that HAS a weekly
+ * schedule; a Toon with no schedule reports programState=0 permanently, so we
+ * can't key the UI off it. Track the user's last mode choice locally instead:
+ * the Manual button sets it, a preset/Program tap clears it. */
+static int manual_hold = 0;
+int boxtalk_manual_hold(void) { return manual_hold; }
 
 /* happ_thermstat device uuid — destination for thermostat/boiler actions. */
 #define THERMSTAT_UUID "b822de89-ecbd-4f6f-9fd2-5cac18fc06c4"
@@ -94,9 +101,9 @@ const char* program_label(void) {
      * name, or "Manual" when off the schedule. The home tile renders
      * the override-aware "(temp)" hint via its own logic next to the
      * mode-toggle button instead of bolting it onto this label. */
-    /* programState == 0 (PROG_MANUAL) is manual hold — happ reports activeState
-     * as the value-matching preset, but the user is NOT on a preset. Say so. */
-    if (toon_state.program_state == 0) return "Manual";
+    /* Manual hold (tracked locally — see manual_hold): happ still reports
+     * activeState as the value-matching preset, but the user is NOT on one. */
+    if (manual_hold) return "Manual";
     int origin = -1;
     if (temp_override_active && temp_override_origin >= 0 &&
                                 temp_override_origin <= 3)
@@ -1100,6 +1107,7 @@ int boxtalk_set_state_value(int state, int centi) {
 
 int boxtalk_set_program(int preset) {
     if (preset < 0 || preset > 3) return -1;   /* preset = comfort level 0..3 */
+    manual_hold = 0;                            /* picking a preset leaves manual */
 #ifdef WASM_BUILD
     /* WASM client: POST the preset to the master, which runs the mode logic. */
     extern void wasm_push_event(const char *, const char *);
@@ -1146,6 +1154,7 @@ int boxtalk_set_manual(void) {
      * schedule. Nudge by 1 centi-°C (0.01 °C, below display resolution)
      * to guarantee the write engages manual. */
     temp_override_active = 0;
+    manual_hold = 1;                       /* user chose Manual: no preset highlight */
     float sp = toon_state.setpoint > 0 ? toon_state.setpoint : 18.0f;
     int centi = (int)(sp * 100.0f + 0.5f);
     centi += (centi < 3000) ? 1 : -1;     /* +0.01 °C unless we're at the cap */

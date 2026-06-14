@@ -51,6 +51,23 @@ static void load_token(void) {
     fclose(f);
 }
 
+/* On-device token config (Settings -> Integrations -> Configure HA entities).
+ * The Long-Lived Access Token lives one-per-line in /mnt/data/ha.cfg. */
+void ha_get_token(char * out, size_t n) {
+    if (!out || n == 0) return;
+    if (!g_token[0]) load_token();
+    snprintf(out, n, "%s", g_token);
+}
+int ha_set_token(const char * tok) {
+    if (!tok) return -1;
+    FILE * f = fopen(HA_TOKEN_PATH, "w");
+    if (!f) return -1;
+    fprintf(f, "%s\n", tok);
+    fclose(f);
+    snprintf(g_token, sizeof g_token, "%s", tok);   /* live, no restart needed */
+    return 0;
+}
+
 /* An entity id / cover group goes straight into a popen'd curl command line,
  * so guard against shell-metachar injection: HA ids are only [A-Za-z0-9._-].
  * Reject anything else (and empty). Defence-in-depth alongside the input

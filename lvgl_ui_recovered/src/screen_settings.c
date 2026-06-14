@@ -18,6 +18,7 @@
 #include "display.h"
 #include "settings.h"
 #include "domoticz.h"
+#include "homeassistant.h"
 #include "calendar.h"
 #include "weather.h"
 #include "backlight.h"
@@ -1817,6 +1818,7 @@ static void open_integrations_modal(lv_event_t * e) {
 
 /* ============== HA entity configuration modal ============== */
 static lv_obj_t * ta_ha_host            = NULL;
+static lv_obj_t * ta_ha_token           = NULL;
 static lv_obj_t * ta_curtain_entity     = NULL;
 static lv_obj_t * ta_curtain_bat_a      = NULL;
 static lv_obj_t * ta_curtain_bat_b      = NULL;
@@ -1893,6 +1895,11 @@ static void on_ha_entities_save(lv_event_t * e) {
         const char * v = lv_textarea_get_text(ta_ha_host);
         snprintf(settings.ha_host, sizeof settings.ha_host, "%s", v ? v : "");
     }
+    if (ta_ha_token) {
+        const char * tk = lv_textarea_get_text(ta_ha_token);
+        if (tk && tk[0]) ha_set_token(tk);   /* write /mnt/data/ha.cfg */
+    }
+    ha_start();                              /* reconnect with the new host + token */
     #define SAVE_TA(ta, field) do { \
         if (ta) { const char * v = lv_textarea_get_text(ta); \
                   snprintf(field, sizeof field, "%s", v ? v : ""); } \
@@ -1948,6 +1955,24 @@ static void open_ha_entities_modal(lv_event_t * e) {
     lv_textarea_set_one_line(ta_ha_host, true);
     lv_textarea_set_placeholder_text(ta_ha_host, "192.168.1.10:8123");
     lv_textarea_set_text(ta_ha_host, settings.ha_host);
+    y += 56;
+
+    /* HA Long-Lived Access Token -> /mnt/data/ha.cfg. HA auth is a token (no
+     * user/pass); create one in HA at Profile -> Long-Lived Access Tokens.
+     * Long to type on the panel — easier to paste via the web UI on :10081 —
+     * but settable here so the on-device config is complete. */
+    lv_obj_t * ltk = lv_label_create(p);
+    lv_obj_set_style_text_color(ltk, lv_color_hex(0xffffff), 0);
+    lv_obj_set_style_text_font(ltk, SF(22), 0);
+    lv_label_set_text(ltk, "HA token:");
+    lv_obj_align(ltk, LV_ALIGN_TOP_LEFT, SX(4), y);
+    ta_ha_token = lv_textarea_create(p);
+    lv_obj_set_size(ta_ha_token, tw, SY(44));
+    lv_obj_align(ta_ha_token, LV_ALIGN_TOP_LEFT, SX(260), y - 4);
+    lv_textarea_set_one_line(ta_ha_token, true);
+    lv_textarea_set_password_mode(ta_ha_token, true);
+    lv_textarea_set_placeholder_text(ta_ha_token, "Long-Lived Access Token");
+    { char tok[256]; ha_get_token(tok, sizeof tok); if (tok[0]) lv_textarea_set_text(ta_ha_token, tok); }
     y += 56;
 
     /* ── Devices ── (dynamic list: lights, covers, switches, scripts, scenes) */

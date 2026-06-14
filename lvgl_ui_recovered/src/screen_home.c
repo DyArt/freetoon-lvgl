@@ -1446,11 +1446,11 @@ static void refresh_cb(lv_timer_t * t) {
      * daemon is parked at active_state=-1 server-side but the override
      * tick will swing it back, so the UI shouldn't pretend we're in Manual. */
     int temp_origin = boxtalk_temp_override_origin();   /* -1 if none */
-    /* Manual hold is tracked locally (boxtalk_manual_hold) from the user's last
-     * mode tap — NOT from programState, which a schedule-less Toon pins at 0
-     * forever (that would wrongly suppress EVERY preset highlight). In manual,
-     * happ still reports activeState as the value-matching preset, so we gate. */
-    int is_manual   = boxtalk_manual_hold();
+    /* programState 0 = PROG_MANUAL. Every Toon ships a weekly schedule, so a
+     * preset tap moves to an override (programState 2/8) and Program resumes
+     * BASE (1) — only a real Manual hold stays 0. In manual happ still reports
+     * activeState as the value-matching preset, so gate the highlight on it. */
+    int is_manual   = (toon_state.program_state == 0);   /* PROG_MANUAL */
     int on_schedule = !is_manual &&
                       ((toon_state.active_state >= 0) || (temp_origin >= 0));
 

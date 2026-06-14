@@ -37,13 +37,6 @@ toon_state_t toon_state = { .program_state = -1, .active_state = -1,
  * the declarations live up here. See note_temp_override() for semantics. */
 static int temp_override_active = 0;
 static int temp_override_origin = -1;   /* program at moment of override */
-/* Whether the user is on a MANUAL hold (Manual button) vs a preset/schedule.
- * happ's programState==0 means "manual" only on a Toon that HAS a weekly
- * schedule; a Toon with no schedule reports programState=0 permanently, so we
- * can't key the UI off it. Track the user's last mode choice locally instead:
- * the Manual button sets it, a preset/Program tap clears it. */
-static int manual_hold = 0;
-int boxtalk_manual_hold(void) { return manual_hold; }
 
 /* happ_thermstat device uuid — destination for thermostat/boiler actions. */
 #define THERMSTAT_UUID "b822de89-ecbd-4f6f-9fd2-5cac18fc06c4"
@@ -101,9 +94,9 @@ const char* program_label(void) {
      * name, or "Manual" when off the schedule. The home tile renders
      * the override-aware "(temp)" hint via its own logic next to the
      * mode-toggle button instead of bolting it onto this label. */
-    /* Manual hold (tracked locally — see manual_hold): happ still reports
-     * activeState as the value-matching preset, but the user is NOT on one. */
-    if (manual_hold) return "Manual";
+    /* programState 0 = PROG_MANUAL: a manual hold. happ still reports activeState
+     * as the value-matching preset, but the user is NOT on a preset. */
+    if (toon_state.program_state == 0) return "Manual";
     int origin = -1;
     if (temp_override_active && temp_override_origin >= 0 &&
                                 temp_override_origin <= 3)
@@ -1107,7 +1100,6 @@ int boxtalk_set_state_value(int state, int centi) {
 
 int boxtalk_set_program(int preset) {
     if (preset < 0 || preset > 3) return -1;   /* preset = comfort level 0..3 */
-    manual_hold = 0;                            /* picking a preset leaves manual */
 #ifdef WASM_BUILD
     /* WASM client: POST the preset to the master, which runs the mode logic. */
     extern void wasm_push_event(const char *, const char *);
@@ -1122,13 +1114,15 @@ int boxtalk_set_program(int preset) {
         if (rc == 0) toon_state.active_state = preset;
         return rc;
     }
-    /* Pick the scheme MODE exactly as the stock UI's setProgramState() does:
-     * a locked override unlocks to a temp override; under manual stay manual;
-     * re-tapping the already-active preset locks it; otherwise temp-override.
-     * program_state holds happ's "programState" (the current PROG_* mode). */
+    /* Pick the scheme MODE like the stock UI's setProgramState(): a locked
+     * override unlocks to a temp override; re-tapping the already-active preset
+     * locks it; otherwise temp-override. Tapping a preset while in MANUAL must
+     * LEAVE manual and engage the preset as a temp override (was: stay manual,
+     * which only nudged the setpoint and left programState=0 — no highlight,
+     * and "Program" appeared dead). */
     int mode;
     if      (toon_state.program_state == PROG_LOCKEDBASE) mode = PROG_TEMPOVERRIDE;
-    else if (toon_state.program_state == PROG_MANUAL)     mode = PROG_MANUAL;
+    else if (toon_state.program_state == PROG_MANUAL)     mode = PROG_TEMPOVERRIDE;
     else if (toon_state.active_state  == preset)          mode = PROG_LOCKEDBASE;
     else                                                  mode = PROG_TEMPOVERRIDE;
 
@@ -1138,40 +1132,52 @@ int boxtalk_set_program(int preset) {
     int rc = http_get_thermstat(q);
     fprintf(stderr, "[bxt] changeSchemeState mode=%d temperatureState=%d rc=%d\n",
             mode, preset, rc);
-    /* Optimistic: activeState is the comfort preset; the mode (program_state)
-     * refreshes from happ on the next poll. */
-    if (rc == 0) toon_state.active_state = preset;
+    /* Optimistic: reflect both the preset AND the new mode at once so the
+     * highlight/program-toggle update immediately, before the next poll. */
+    if (rc == 0) {
+        toon_state.active_state  = preset;
+        toon_state.program_state = mode;
+    }
     return rc;
 }
 
 int boxtalk_set_manual(void) {
-    /* "Manual" in the UI: leave the schedule and hold the setpoint
-     * indefinitely. happ_thermstat only flips activeState to -1 when
-     * roomSetpoint writes a *different* value than the current one — a
-     * same-value write returns "ok" and silently no-ops, so tapping
-     * Manual right after Program (which had already pinned the setpoint
-     * to the preset's stored value) used to leave the device on the
-     * schedule. Nudge by 1 centi-°C (0.01 °C, below display resolution)
-     * to guarantee the write engages manual. */
+    /* "Manual": leave the schedule and hold indefinitely (programState=0).
+     * Verified on a Toon 2: a bare roomSetpoint write makes a TEMP override
+     * (programState=2, reverts at the next schedule switch), NOT a manual hold.
+     * The canonical manual is changeSchemeState&state=0. temperatureState holds
+     * the preset whose stored temp the user is already on (≈ current setpoint);
+     * happ jumps the setpoint to it. */
     temp_override_active = 0;
-    manual_hold = 1;                       /* user chose Manual: no preset highlight */
-    float sp = toon_state.setpoint > 0 ? toon_state.setpoint : 18.0f;
-    int centi = (int)(sp * 100.0f + 0.5f);
-    centi += (centi < 3000) ? 1 : -1;     /* +0.01 °C unless we're at the cap */
-    int rc = boxtalk_set_setpoint(centi / 100.0f);
-    if (rc == 0) toon_state.active_state = -1;
+    int ts = (toon_state.active_state >= 0 && toon_state.active_state <= 3)
+                 ? toon_state.active_state : 1;
+    char q[80];
+    snprintf(q, sizeof(q),
+             "action=changeSchemeState&state=%d&temperatureState=%d", PROG_MANUAL, ts);
+    int rc = http_get_thermstat(q);
+    fprintf(stderr, "[bxt] set_manual changeSchemeState state=0 ts=%d rc=%d\n", ts, rc);
+    if (rc == 0) {
+        toon_state.program_state = PROG_MANUAL;   /* 0, optimistic */
+        toon_state.active_state  = -1;            /* not on a preset */
+    }
     return rc;
 }
 
 int boxtalk_resume_schedule(void) {
-    /* "Follow the schedule again." happ_thermstat doesn't have a verb
-     * for "resume schedule" — instead we ask for the preset the schedule
-     * says is currently active, which puts activeState back ≥0 and lets
-     * the schedule daemon progress normally from there. */
+    /* "Program/Auto": resume the weekly schedule (programState=1, PROG_BASE).
+     * Verified on a Toon 2: state=1 repopulates nextProgram/nextState/nextTime
+     * and activeState from the schedule. set_program would instead pick an
+     * override mode (2/8), so send PROG_BASE directly. */
     temp_override_active = 0;
     int now_state = schedule_program_now();
-    if (now_state < 0) now_state = 1;     /* fall back to Home if no schedule */
-    return boxtalk_set_program(now_state);
+    if (now_state < 0) now_state = 1;     /* fall back to Home if the schedule is unknown */
+    char q[80];
+    snprintf(q, sizeof(q),
+             "action=changeSchemeState&state=%d&temperatureState=%d", PROG_BASE, now_state);
+    int rc = http_get_thermstat(q);
+    fprintf(stderr, "[bxt] resume_schedule changeSchemeState state=1 ts=%d rc=%d\n", now_state, rc);
+    if (rc == 0) toon_state.program_state = PROG_BASE;   /* 1, optimistic */
+    return rc;
 }
 
 /* +/- on the home tile = temporary override that auto-reverts to the

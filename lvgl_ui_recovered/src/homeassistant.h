@@ -119,6 +119,8 @@ void ha_device_set_pin(int idx, int pin);
 
 /* Start the poller (background thread, ~10s loop). Returns 0 on success. */
 int ha_start(void);
+void ha_get_token(char * out, size_t n);
+int  ha_set_token(const char * tok);
 
 /* Fire-and-forget actions on the configured curtain cover. Async — the HTTP
  * POST runs on a detached thread so LVGL stays responsive. */

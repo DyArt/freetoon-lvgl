@@ -12,6 +12,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <strings.h>   /* strncasecmp */
 #include <unistd.h>
 #include <pthread.h>
 #include <time.h>
@@ -20,11 +21,25 @@ weather_state_t weather_state = {0};
 
 #define STATION_ID 6249  /* Berkhout — nearest configured to the user. */
 
+/* Case-insensitive strstr. Buienradar's data feed switched from lowercase keys
+ * ("stationid","temperature","iconurl","actualradarurl"…) to PascalCase
+ * ("StationId","Temperature","IconUrl","ActualRadarUrl"…), which silently broke
+ * the current-weather + radar parse. Matching keys case-insensitively makes the
+ * parser survive either casing (and any future flip). */
+static const char * ci_strstr(const char * hay, const char * needle) {
+    if (!hay || !needle) return NULL;
+    size_t nl = strlen(needle);
+    if (nl == 0) return hay;
+    for (; *hay; hay++)
+        if (strncasecmp(hay, needle, nl) == 0) return hay;
+    return NULL;
+}
+
 /* Scan a substring of json for "key":<number>; returns parsed double, dflt if missing. */
 static double js_num(const char * begin, const char * end, const char * key, double dflt) {
     char n[64];
     snprintf(n, sizeof(n), "\"%s\":", key);
-    const char * p = strstr(begin, n);
+    const char * p = ci_strstr(begin, n);
     if (!p || p >= end) return dflt;
     p += strlen(n);
     while (*p == ' ' || *p == '\t') p++;
@@ -40,7 +55,7 @@ static int js_str(const char * begin, const char * end, const char * key,
                   char * out, size_t outsz) {
     char n[64];
     snprintf(n, sizeof(n), "\"%s\":\"", key);
-    const char * p = strstr(begin, n);
+    const char * p = ci_strstr(begin, n);
     if (!p || p >= end) { if (outsz) out[0] = 0; return 0; }
     p += strlen(n);
     const char * e = p;
@@ -98,7 +113,7 @@ static int parse_buienradar(const char * body) {
     /* --- current station --- */
     char needle[64];
     snprintf(needle, sizeof(needle), "\"stationid\":%d", STATION_ID);
-    const char * st = strstr(body, needle);
+    const char * st = ci_strstr(body, needle);
     if (!st) return -1;
     /* Limit search to "}}" terminator of this station object. */
     const char * st_end = strstr(st, "}");
@@ -128,9 +143,9 @@ static int parse_buienradar(const char * body) {
            weather_state.radar_url, sizeof(weather_state.radar_url));
 
     /* --- weatherreport title + text --- */
-    const char * wr = strstr(body, "\"weatherreport\":");
+    const char * wr = ci_strstr(body, "\"weatherreport\":");
     if (wr) {
-        const char * wr_end = strstr(wr, "\"shortterm\"");
+        const char * wr_end = ci_strstr(wr, "\"shortterm\"");
         if (!wr_end) wr_end = wr + 4096;
         js_str(wr, wr_end, "title", weather_state.weatherreport_title,
                sizeof(weather_state.weatherreport_title));
@@ -147,11 +162,11 @@ static int parse_buienradar(const char * body) {
 
     /* --- 5-day forecast --- */
     weather_state.day_count = 0;
-    const char * fc = strstr(body, "\"fivedayforecast\":[");
+    const char * fc = ci_strstr(body, "\"fivedayforecast\":[");
     if (!fc) return 0;
     const char * walk = fc;
     for (int i = 0; i < WEATHER_FORECAST_DAYS; i++) {
-        walk = strstr(walk, "{\"$id\":");
+        walk = ci_strstr(walk, "\"Day\":");
         if (!walk) break;
         const char * day_end = strstr(walk, "}");
         if (!day_end) break;

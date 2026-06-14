@@ -1441,49 +1441,27 @@ static void refresh_cb(lv_timer_t * t) {
         lv_label_set_text(lbl_t_setpoint, "");
     }
 
-    /* Mode toggle + preset highlighting in one pass.  on_schedule treats a
-     * +/- temporary override as "still on the schedule" — the schedule
-     * daemon is parked at active_state=-1 server-side but the override
-     * tick will swing it back, so the UI shouldn't pretend we're in Manual. */
-    int temp_origin = boxtalk_temp_override_origin();   /* -1 if none */
-    /* programState 0 = PROG_MANUAL. Every Toon ships a weekly schedule, so a
-     * preset tap moves to an override (programState 2/8) and Program resumes
-     * BASE (1) — only a real Manual hold stays 0. In manual happ still reports
-     * activeState as the value-matching preset, so gate the highlight on it. */
-    int is_manual   = (toon_state.program_state == 0);   /* PROG_MANUAL */
-    int on_schedule = !is_manual &&
-                      ((toon_state.active_state >= 0) || (temp_origin >= 0));
+    /* Mirror the stock UI's setActiveProgramState() (Toon mobile.js, the HCB web
+     * app — the authoritative reference). Two INDEPENDENT things:
+     *   1. the active preset (activeState 0..3) is highlighted ALWAYS — even in
+     *      Manual (stock adds 'ui-btn-sel' to activeState regardless of mode);
+     *   2. the Manual/Program toggle reflects programState only: "program" for
+     *      BASE/TEMPOVERRIDE/PROGOVERRIDE/LOCKEDBASE (1/2/3/8), "manual" for
+     *      MANUAL/HOLIDAY (0/4/5). */
+    int ps = toon_state.program_state;
+    int on_program = (ps == 1 || ps == 2 || ps == 3 || ps == 8);
 
     if (tile_btn_mode_manual)
-        lv_obj_set_style_border_width(tile_btn_mode_manual,
-                                      on_schedule ? 0 : 2, 0);
+        lv_obj_set_style_border_width(tile_btn_mode_manual,  on_program ? 0 : 2, 0);
     if (tile_btn_mode_program)
-        lv_obj_set_style_border_width(tile_btn_mode_program,
-                                      on_schedule ? 2 : 0, 0);
+        lv_obj_set_style_border_width(tile_btn_mode_program, on_program ? 2 : 0, 0);
+    if (lbl_t_program)
+        lv_label_set_text(lbl_t_program, "Program");
 
-    /* Program-button label: just "Program" normally, "Program*" while a
-     * +/- temporary override is outstanding (the schedule will reassert
-     * itself at the next switch). The active preset is identifiable from
-     * the highlighted button on the preset row below — no need to also
-     * carry it inside the mode-toggle label. */
-    int preset;
-    if (toon_state.active_state >= 0 && toon_state.active_state <= 3) {
-        preset = toon_state.active_state;   /* activeState IS the live preset */
-    } else {
-        preset = temp_origin;
-    }
-    if (lbl_t_program) {
-        lv_label_set_text(lbl_t_program,
-            boxtalk_temp_override_active() ? "Program*" : "Program");
-    }
-
-    /* Direct-preset row: white border on whichever preset is currently in
-     * effect. While a +/- temporary override is armed the schedule has
-     * been parked at active_state=-1 server-side, so fall back to the
-     * captured origin preset so the highlight survives the nudge. Manual
-     * mode (no override either) drops all borders. */
+    /* Preset row: white border on activeState's preset — always (stock). */
     {
-        int hi = on_schedule ? preset : -1;
+        int hi = (toon_state.active_state >= 0 && toon_state.active_state <= 3)
+                     ? toon_state.active_state : -1;
         for (int i = 0; i < 4; i++) {
             if (!tile_btn_preset[i]) continue;
             lv_obj_set_style_border_width(tile_btn_preset[i],

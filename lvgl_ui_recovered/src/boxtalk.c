@@ -90,29 +90,16 @@ const char* program_label(void) {
      * UI surfaces it as "Scheduled: Home" so the *mode* (manual vs. on the
      * schedule) is one tap away from being obvious. Returns a pointer into
      * a static buffer; safe because LVGL copies labels on set_text. */
-    /* Short label suitable for ambient/dim use: just the active preset
-     * name, or "Manual" when off the schedule. The home tile renders
-     * the override-aware "(temp)" hint via its own logic next to the
-     * mode-toggle button instead of bolting it onto this label. */
-    /* programState 0 = PROG_MANUAL: a manual hold. happ still reports activeState
-     * as the value-matching preset, but the user is NOT on a preset. */
-    if (toon_state.program_state == 0) return "Manual";
-    int origin = -1;
-    if (temp_override_active && temp_override_origin >= 0 &&
-                                temp_override_origin <= 3)
-        origin = temp_override_origin;
-    /* activeState IS the live preset (Comfort/Home/Sleep/Away); program_state is
-     * the schedule MODE index and stays ~0, so reading it here made the dim
-     * screen always say "Comfort". Match the home-tile highlight: use active_state. */
-    int preset_idx = (toon_state.active_state >= 0)
-                         ? toon_state.active_state : origin;
-    if (preset_idx < 0) return "Manual";
-    switch (preset_idx) {
+    /* Dim/ambient label = the active preset name (stock getStateName(activeState)),
+     * which the stock UI surfaces regardless of mode; "Manual" only when there is
+     * no active preset (activeState == -1). The mode itself (Manual vs Program) is
+     * the home tile's toggle, not this label. */
+    switch (toon_state.active_state) {
         case 0: return "Comfort";
         case 1: return "Home";
         case 2: return "Sleep";
         case 3: return "Away";
-        default: return "Scheduled";
+        default: return "Manual";
     }
 }
 
@@ -1114,15 +1101,16 @@ int boxtalk_set_program(int preset) {
         if (rc == 0) toon_state.active_state = preset;
         return rc;
     }
-    /* Pick the scheme MODE like the stock UI's setProgramState(): a locked
-     * override unlocks to a temp override; re-tapping the already-active preset
-     * locks it; otherwise temp-override. Tapping a preset while in MANUAL must
-     * LEAVE manual and engage the preset as a temp override (was: stay manual,
-     * which only nudged the setpoint and left programState=0 — no highlight,
-     * and "Program" appeared dead). */
+    /* Mirror the stock UI's setProgramState() VERBATIM (Toon mobile.js, the HCB
+     * web app — the authoritative reference):
+     *   if  programState == LOCKEDBASE -> TEMPOVERRIDE   (a new choice unlocks)
+     *   elif programState == MANUAL    -> MANUAL         (stay manual; only the
+     *                                     temperatureState/setpoint changes)
+     *   elif activeState  == preset    -> LOCKEDBASE     (2nd tap of same = lock)
+     *   else                           -> TEMPOVERRIDE   (override until next switch) */
     int mode;
     if      (toon_state.program_state == PROG_LOCKEDBASE) mode = PROG_TEMPOVERRIDE;
-    else if (toon_state.program_state == PROG_MANUAL)     mode = PROG_TEMPOVERRIDE;
+    else if (toon_state.program_state == PROG_MANUAL)     mode = PROG_MANUAL;
     else if (toon_state.active_state  == preset)          mode = PROG_LOCKEDBASE;
     else                                                  mode = PROG_TEMPOVERRIDE;
 

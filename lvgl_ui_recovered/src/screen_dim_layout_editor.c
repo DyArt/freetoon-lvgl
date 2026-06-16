@@ -156,10 +156,14 @@ static void on_toggle_vis(lv_event_t * e) {
 
 static void on_reset(lv_event_t * e) {
     (void)e;
+    /* "Standaard" = go back to the ORIGINAL dim: disable the custom layout and
+     * restart (mirrors the home editor's reset). */
     dim_layout_reset_default();
-    for (int i = 0; i < DB_COUNT; i++) edit_dim[i] = g_dim_blocks[i];
-    for (int i = 0; i < DB_COUNT; i++) place_rect(i);
-    sel = -1; update_sel_label();
+    dim_layout_save();
+    settings.dim_custom_enabled = 0;
+    settings_save();
+    fprintf(stderr, "[dim-layout] reset to standard dim — restarting UI\n");
+    ui_request_restart();
 }
 
 static void on_cancel(lv_event_t * e) {
@@ -173,7 +177,9 @@ static void on_save(lv_event_t * e) {
     (void)e;
     for (int i = 0; i < DB_COUNT; i++) g_dim_blocks[i] = edit_dim[i];
     dim_layout_save();
-    fprintf(stderr, "[dim-layout] saved — restarting UI to apply\n");
+    settings.dim_custom_enabled = 1;   /* opt in to the custom dim layout */
+    settings_save();
+    fprintf(stderr, "[dim-layout] saved + enabled — restarting UI to apply\n");
     ui_request_restart();
 }
 

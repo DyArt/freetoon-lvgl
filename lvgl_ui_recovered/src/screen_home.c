@@ -1449,6 +1449,10 @@ static void refresh_cb(lv_timer_t * t) {
     char clk[16];
     strftime(clk, sizeof(clk), "%H %M", &tm);   /* space; pulsing colon overlays */
     lv_label_set_text(lbl_t_clock, clk);
+    /* Re-centre the ":" overlay on the (now real-width) clock — the create-time
+     * align used the narrower "-- --" placeholder, which left the colon sitting
+     * on a digit instead of in the gap (so it looked missing on the device). */
+    if (lbl_t_clock_colon) lv_obj_align_to(lbl_t_clock_colon, lbl_t_clock, LV_ALIGN_CENTER, 0, 0);
     if (lbl_t_date) {
         char dt[48];
         i18n_date_short(dt, sizeof(dt), &tm);   /* localised — strftime is C-locale (always English) */

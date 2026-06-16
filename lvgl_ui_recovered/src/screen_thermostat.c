@@ -131,14 +131,6 @@ static void refresh_cb(lv_timer_t * t) {
     if (toon_state.setpoint > 0)
         lv_label_set_text_fmt(lbl_setpoint, tr("Streefwaarde: %.1f°C", "Setpoint: %.1f°C"), toon_state.setpoint);
 
-    /* For the "flow" reading prefer boiler_out_temp — that's the freshest
-     * OTGW CurrentBoilerTemperature coming through the bridge. The
-     * TemperatureSensor-based boiler_temp from happ_thermstat lags by tens
-     * of seconds while ramping, which made the label disagree with the
-     * "CH water Flow" panel on the right. */
-    float flow_t = (toon_state.boiler_out_temp > 0)
-                       ? toon_state.boiler_out_temp
-                       : toon_state.boiler_temp;
     /* Status line — short word only ("Heating" / "Hot water" / "Boiler idle").
      * The radiator+flame glyph next to the indoor temp carries the visual,
      * and the right-column "CH water Flow … Return …" panel has the temps.

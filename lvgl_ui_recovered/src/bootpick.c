@@ -20,8 +20,13 @@
 #include <string.h>
 #include <unistd.h>
 
-#define BP_HOR 1024
-#define BP_VER 600
+/* Drive LVGL + the draw buffer from the REAL panel resolution. Hardcoding
+ * 1024x600 told LVGL the Toon 1 panel (800x480) was wider/taller than it is, so
+ * fbdev_flush wrote every row at the wrong stride → the garbled "text up top,
+ * noise below" boot splash the tester saw. DISP_HOR/VER are 800x480 under TOON1,
+ * 1024x600 otherwise (display.h). */
+#define BP_HOR DISP_HOR
+#define BP_VER DISP_VER
 #define BP_DRAW_LINES 100
 #define BP_COUNTDOWN_S 10
 
@@ -117,10 +122,90 @@ static void tick_countdown(lv_timer_t * t) {
                                  ? "freetoon"
                                  : tr("stock qt-gui", "stock qt-gui");
         lv_label_set_text_fmt(bp_lbl_countdown,
-            tr("%s start over %d s — tik om te kiezen",
-               "Booting %s in %d s — tap to choose"),
+            tr("%s start over %d s - tik om te kiezen",
+               "Booting %s in %d s - tap to choose"),
             which, bp_remaining_seconds);
     }
+}
+
+/* Build the picker UI (title + countdown + two big buttons) onto `scr`. Shared
+ * by bootpick_run() and the headless-sim wrapper so the exact layout can be
+ * verified at 800x480 without the device. Coords are SX/SY-scaled so the picker
+ * fits the Toon 1 panel, not just the 1024x600 design size. */
+static void bootpick_build_ui(lv_obj_t * scr) {
+    lv_obj_set_style_bg_color(scr, lv_color_hex(0x0f1a2a), 0);
+    lv_obj_clear_flag(scr, LV_OBJ_FLAG_SCROLLABLE);
+
+    lv_obj_t * title = lv_label_create(scr);
+    lv_obj_set_style_text_font(title, SF(28), 0);
+    lv_obj_set_style_text_color(title, lv_color_hex(0xffffff), 0);
+    lv_label_set_text(title, tr("Kies UI", "Choose UI"));
+    lv_obj_align(title, LV_ALIGN_TOP_MID, 0, SY(50));
+
+    bp_lbl_countdown = lv_label_create(scr);
+    lv_obj_set_style_text_font(bp_lbl_countdown, SF(22), 0);
+    lv_obj_set_style_text_color(bp_lbl_countdown, lv_color_hex(0x88aabb), 0);
+    lv_label_set_text(bp_lbl_countdown, "");
+    lv_obj_align(bp_lbl_countdown, LV_ALIGN_TOP_MID, 0, SY(140));
+    /* prime the label so the first second of the countdown isn't blank */
+    {
+        const char * which = (bp_default_choice == CHOICE_FREETOON)
+                                 ? "freetoon" : tr("stock qt-gui", "stock qt-gui");
+        lv_label_set_text_fmt(bp_lbl_countdown,
+            tr("%s start over %d s - tik om te kiezen",
+               "Booting %s in %d s - tap to choose"),
+            which, bp_remaining_seconds);
+    }
+
+    /* Two big tap-friendly buttons, side by side and centred. */
+    bp_btn_freetoon = lv_btn_create(scr);
+    lv_obj_set_size(bp_btn_freetoon, SX(380), SY(240));
+    lv_obj_align(bp_btn_freetoon, LV_ALIGN_CENTER, SX(-210), SY(60));
+    lv_obj_set_style_bg_color(bp_btn_freetoon, lv_color_hex(0x2a4060), 0);
+    lv_obj_set_style_radius(bp_btn_freetoon, SX(24), 0);
+    lv_obj_add_event_cb(bp_btn_freetoon, on_pick_freetoon, LV_EVENT_CLICKED, NULL);
+    {
+        lv_obj_t * l = lv_label_create(bp_btn_freetoon);
+        lv_obj_set_style_text_font(l, SF(28), 0);
+        lv_obj_set_style_text_color(l, lv_color_hex(0xffffff), 0);
+        lv_label_set_text(l, "freetoon-lvgl");
+        lv_obj_align(l, LV_ALIGN_CENTER, 0, SY(-24));
+        lv_obj_t * s = lv_label_create(bp_btn_freetoon);
+        lv_obj_set_style_text_font(s, SF(18), 0);
+        lv_obj_set_style_text_color(s, lv_color_hex(0x9ec4e6), 0);
+        lv_label_set_text(s, tr("Eigen LVGL UI", "Custom LVGL UI"));
+        lv_obj_align(s, LV_ALIGN_CENTER, 0, SY(22));
+    }
+
+    bp_btn_qtgui = lv_btn_create(scr);
+    lv_obj_set_size(bp_btn_qtgui, SX(380), SY(240));
+    lv_obj_align(bp_btn_qtgui, LV_ALIGN_CENTER, SX(210), SY(60));
+    lv_obj_set_style_bg_color(bp_btn_qtgui, lv_color_hex(0x483a2a), 0);
+    lv_obj_set_style_radius(bp_btn_qtgui, SX(24), 0);
+    lv_obj_add_event_cb(bp_btn_qtgui, on_pick_qtgui, LV_EVENT_CLICKED, NULL);
+    {
+        lv_obj_t * l = lv_label_create(bp_btn_qtgui);
+        lv_obj_set_style_text_font(l, SF(28), 0);
+        lv_obj_set_style_text_color(l, lv_color_hex(0xffffff), 0);
+        lv_label_set_text(l, tr("Stock qt-gui", "Stock qt-gui"));
+        lv_obj_align(l, LV_ALIGN_CENTER, 0, SY(-24));
+        lv_obj_t * s = lv_label_create(bp_btn_qtgui);
+        lv_obj_set_style_text_font(s, SF(18), 0);
+        lv_obj_set_style_text_color(s, lv_color_hex(0xddc296), 0);
+        lv_label_set_text(s, tr("Originele Eneco UI", "Original Eneco UI"));
+        lv_obj_align(s, LV_ALIGN_CENTER, 0, SY(22));
+    }
+    apply_button_highlight();
+}
+
+/* Headless-sim wrapper: render the picker layout at the build's panel size
+ * (sim1 = 800x480) so the Toon 1 layout can be checked without the device. */
+lv_obj_t * screen_bootpick_create(void) {
+    bp_default_choice    = CHOICE_FREETOON;
+    bp_remaining_seconds = BP_COUNTDOWN_S;
+    lv_obj_t * scr = lv_obj_create(NULL);
+    bootpick_build_ui(scr);
+    return scr;
 }
 
 /* Single-shot LVGL/fb/evdev init + render + tap-loop. Returns the rc to
@@ -199,70 +284,7 @@ int bootpick_run(void) {
     lv_indev_drv_register(&indev_drv);
 
     lv_obj_t * scr = lv_scr_act();
-    lv_obj_set_style_bg_color(scr, lv_color_hex(0x0f1a2a), 0);
-    lv_obj_clear_flag(scr, LV_OBJ_FLAG_SCROLLABLE);
-
-    lv_obj_t * title = lv_label_create(scr);
-    lv_obj_set_style_text_font(title, SF(28), 0);
-    lv_obj_set_style_text_color(title, lv_color_hex(0xffffff), 0);
-    lv_label_set_text(title, tr("Kies UI", "Choose UI"));
-    lv_obj_align(title, LV_ALIGN_TOP_MID, 0, 50);
-
-    bp_lbl_countdown = lv_label_create(scr);
-    lv_obj_set_style_text_font(bp_lbl_countdown, SF(22), 0);
-    lv_obj_set_style_text_color(bp_lbl_countdown, lv_color_hex(0x88aabb), 0);
-    lv_label_set_text(bp_lbl_countdown, "");
-    lv_obj_align(bp_lbl_countdown, LV_ALIGN_TOP_MID, 0, 140);
-    /* prime the label so the first second of the countdown isn't blank */
-    {
-        const char * which = (bp_default_choice == CHOICE_FREETOON)
-                                 ? "freetoon"
-                                 : tr("stock qt-gui", "stock qt-gui");
-        lv_label_set_text_fmt(bp_lbl_countdown,
-            tr("%s start over %d s — tik om te kiezen",
-               "Booting %s in %d s — tap to choose"),
-            which, bp_remaining_seconds);
-    }
-
-    /* Two big tap-friendly buttons, side by side and centred. */
-    bp_btn_freetoon = lv_btn_create(scr);
-    lv_obj_set_size(bp_btn_freetoon, 380, 240);
-    lv_obj_align(bp_btn_freetoon, LV_ALIGN_CENTER, -210, 60);
-    lv_obj_set_style_bg_color(bp_btn_freetoon, lv_color_hex(0x2a4060), 0);
-    lv_obj_set_style_radius(bp_btn_freetoon, 24, 0);
-    lv_obj_add_event_cb(bp_btn_freetoon, on_pick_freetoon, LV_EVENT_CLICKED, NULL);
-    {
-        lv_obj_t * l = lv_label_create(bp_btn_freetoon);
-        lv_obj_set_style_text_font(l, SF(28), 0);
-        lv_obj_set_style_text_color(l, lv_color_hex(0xffffff), 0);
-        lv_label_set_text(l, "freetoon-lvgl");
-        lv_obj_align(l, LV_ALIGN_CENTER, 0, -24);
-        lv_obj_t * s = lv_label_create(bp_btn_freetoon);
-        lv_obj_set_style_text_font(s, SF(18), 0);
-        lv_obj_set_style_text_color(s, lv_color_hex(0x9ec4e6), 0);
-        lv_label_set_text(s, tr("Eigen LVGL UI", "Custom LVGL UI"));
-        lv_obj_align(s, LV_ALIGN_CENTER, 0, 22);
-    }
-
-    bp_btn_qtgui = lv_btn_create(scr);
-    lv_obj_set_size(bp_btn_qtgui, 380, 240);
-    lv_obj_align(bp_btn_qtgui, LV_ALIGN_CENTER, 210, 60);
-    lv_obj_set_style_bg_color(bp_btn_qtgui, lv_color_hex(0x483a2a), 0);
-    lv_obj_set_style_radius(bp_btn_qtgui, 24, 0);
-    lv_obj_add_event_cb(bp_btn_qtgui, on_pick_qtgui, LV_EVENT_CLICKED, NULL);
-    {
-        lv_obj_t * l = lv_label_create(bp_btn_qtgui);
-        lv_obj_set_style_text_font(l, SF(28), 0);
-        lv_obj_set_style_text_color(l, lv_color_hex(0xffffff), 0);
-        lv_label_set_text(l, tr("Stock qt-gui", "Stock qt-gui"));
-        lv_obj_align(l, LV_ALIGN_CENTER, 0, -24);
-        lv_obj_t * s = lv_label_create(bp_btn_qtgui);
-        lv_obj_set_style_text_font(s, SF(18), 0);
-        lv_obj_set_style_text_color(s, lv_color_hex(0xddc296), 0);
-        lv_label_set_text(s, tr("Originele Eneco UI", "Original Eneco UI"));
-        lv_obj_align(s, LV_ALIGN_CENTER, 0, 22);
-    }
-    apply_button_highlight();
+    bootpick_build_ui(scr);
 
     /* Force one paint so the screen actually appears before we drop into
      * the 1 Hz timer — without this the framebuffer can stay black for

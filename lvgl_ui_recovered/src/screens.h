@@ -36,6 +36,8 @@ lv_obj_t * screen_layout_editor_create(void);
 /* Dim-screen block layout editor ("Dim indeling"). */
 void screen_dim_layout_editor_show(void);
 lv_obj_t * screen_dim_layout_editor_create(void);
+/* Boot picker layout (headless-sim render only; device path is bootpick_run). */
+lv_obj_t * screen_bootpick_create(void);
 lv_obj_t * screen_crypto_picker_create(void);   /* Settings -> Crypto coin live-search */
 lv_obj_t * screen_ha_picker_create(void);       /* Settings -> HA entity picker (domain-filtered list) */
 void screen_ha_picker_open(const char * domain, lv_obj_t * target_ta);  /* sets domain+target, then ui_push */

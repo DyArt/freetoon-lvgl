@@ -2895,6 +2895,9 @@ lv_obj_t * screen_home_create(void) {
     lv_obj_set_style_text_color(lbl_t_clock_colon, lv_color_hex(COL_TEXT_HI), 0);
     lv_obj_set_style_text_font(lbl_t_clock_colon, SF(28), 0);
     lv_label_set_text(lbl_t_clock_colon, ":");
+    /* Force the clock's geometry to be computed so align_to reads real coords
+     * (without this the colon can land at 0,0 of the tile and look "missing"). */
+    lv_obj_update_layout(lbl_t_clock);
     lv_obj_align_to(lbl_t_clock_colon, lbl_t_clock, LV_ALIGN_CENTER, 0, 0);
     clock_colon_pulse(lbl_t_clock_colon);
 

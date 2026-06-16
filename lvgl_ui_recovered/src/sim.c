@@ -199,6 +199,7 @@ static const struct { const char * name; create_fn fn; } SCREENS[] = {
     { "ha_devices",  screen_ha_devices_create },
     { "layout",      screen_layout_editor_create },
     { "dim_layout",  screen_dim_layout_editor_create },
+    { "bootpick",    screen_bootpick_create },
     { "crypto_pick", screen_crypto_picker_create },
     { "crypto",      screen_crypto_create },
 };

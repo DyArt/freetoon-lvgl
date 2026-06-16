@@ -591,12 +591,17 @@ static void refresh_cb(lv_timer_t * t) {
         snprintf(gtxt, sizeof gtxt, "%.2f m3/h", g);
 
         int show = settings.show_dim_bars;
+        /* Keep the energy/gas section visible whenever the toggle is on — show an
+         * empty bar + "--" when the source is offline, instead of vanishing (the
+         * P1 drops out intermittently, which made gas/energy "disappear"). */
+        if (!g_conn) { gr = 0; snprintf(gtxt, sizeof gtxt, "-- m3/h"); }
+        if (!e_conn) { er = 0; snprintf(etxt, sizeof etxt, "-- W"); }
         if (!settings.dim_bars_swap) {             /* default: gas LEFT, energy RIGHT */
-            dim_bar_set(bar_l_env, bar_l_fill, bar_l_cap, -1, show && g_conn, 0, gr, 0xffaa33, gtxt);
-            dim_bar_set(bar_r_env, bar_r_fill, bar_r_cap, +1, show && e_conn, 0, er, 0xffffff, etxt);
+            dim_bar_set(bar_l_env, bar_l_fill, bar_l_cap, -1, show, 0, gr, 0xffaa33, gtxt);
+            dim_bar_set(bar_r_env, bar_r_fill, bar_r_cap, +1, show, 0, er, 0xffffff, etxt);
         } else {                                   /* swapped: energy LEFT, gas RIGHT */
-            dim_bar_set(bar_l_env, bar_l_fill, bar_l_cap, -1, show && e_conn, 0, er, 0xffffff, etxt);
-            dim_bar_set(bar_r_env, bar_r_fill, bar_r_cap, +1, show && g_conn, 0, gr, 0xffaa33, gtxt);
+            dim_bar_set(bar_l_env, bar_l_fill, bar_l_cap, -1, show, 0, er, 0xffffff, etxt);
+            dim_bar_set(bar_r_env, bar_r_fill, bar_r_cap, +1, show, 0, gr, 0xffaa33, gtxt);
         }
     }
 
@@ -698,7 +703,9 @@ lv_obj_t * screen_dim_create(void) {
     lv_obj_set_style_text_font(lbl_metrics,
         DISP_VER < 600 ? &lv_font_montserrat_18 : &lv_font_montserrat_22, 0);
     lv_label_set_text(lbl_metrics, "");
-    lv_obj_align(lbl_metrics, LV_ALIGN_CENTER, 0, SY(162) + (DISP_VER < 600 ? 18 : 0));
+    /* TVOC/CO2/CV row dropped lower into the gap between the thermostat mode and
+     * the weather strip (user request). Toon 1 stays put — that panel is tight. */
+    lv_obj_align(lbl_metrics, LV_ALIGN_CENTER, 0, SY(162) + (DISP_VER < 600 ? 18 : 30));
 
     /* Burner state — sits to the right of lbl_program on the same baseline.
        CH-heating shows "-> 90 C" (red). DHW shows the faucet+drop pair

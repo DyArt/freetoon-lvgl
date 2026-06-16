@@ -167,9 +167,12 @@ void clock_colon_pulse(lv_obj_t * colon) {
     lv_anim_init(&a);
     lv_anim_set_var(&a, colon);
     lv_anim_set_exec_cb(&a, clock_colon_anim_cb);
-    lv_anim_set_values(&a, 255, 40);
-    lv_anim_set_time(&a, 550);
-    lv_anim_set_playback_time(&a, 550);
+    /* Pulse between full and ~45% so the tick is clearly visible but the colon
+     * never vanishes (255->40 read as off/invisible, esp. on the small home
+     * clock). ~1 s period, like a real clock. */
+    lv_anim_set_values(&a, 255, 115);
+    lv_anim_set_time(&a, 500);
+    lv_anim_set_playback_time(&a, 500);
     lv_anim_set_repeat_count(&a, LV_ANIM_REPEAT_INFINITE);
     lv_anim_set_path_cb(&a, lv_anim_path_ease_in_out);
     lv_anim_start(&a);

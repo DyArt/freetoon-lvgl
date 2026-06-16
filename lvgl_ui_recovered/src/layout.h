@@ -67,7 +67,8 @@ typedef enum {
     DB_WASTE,        /* next waste pickup */
     DB_FAMILY,       /* Life360 */
     DB_VENT,         /* Itho ventilation fan + mode/% */
-    DB_ENERGY,       /* power (W) + gas (m³/h) mini-bars */
+    DB_ENERGY,       /* electricity power (W) value + mini-bar */
+    DB_GAS,          /* gas (m³/h) value + mini-bar */
     DB_COUNT
 } dim_block_id_t;
 

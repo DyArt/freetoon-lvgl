@@ -392,10 +392,12 @@ static const dim_block_t DIM_DEFAULTS[DB_COUNT] = {
     [DB_WASTE]    = { 0, 0, 3, 3, 1 },
     [DB_WEATHER]  = { 9, 0, 3, 3, 1 },
     [DB_VENT]     = { 0, 4, 2, 2, 1 },
-    [DB_THERMO]   = { 2, 4, 7, 2, 1 },
+    [DB_THERMO]   = { 3, 4, 6, 2, 1 },   /* w6 centred on col6 = screen centre, so
+                                            the indoor temp lines up under the clock */
     [DB_FAMILY]   = { 9, 4, 3, 2, 1 },
-    [DB_FORECAST] = { 0, 6, 9, 2, 1 },   /* narrowed to make room for energy */
-    [DB_ENERGY]   = { 9, 6, 3, 2, 1 },   /* bottom-right corner */
+    [DB_FORECAST] = { 0, 6, 9, 2, 1 },   /* narrowed to make room for energy/gas */
+    [DB_ENERGY]   = { 9, 6, 3, 1, 1 },   /* bottom-right, stacked over gas */
+    [DB_GAS]      = { 9, 7, 3, 1, 1 },
 };
 
 void dim_layout_reset_default(void) {
@@ -454,7 +456,8 @@ const char * dim_block_name(int id) {
         case DB_WASTE:    return "Afval";
         case DB_FAMILY:   return "Familie";
         case DB_VENT:     return "Ventilatie";
-        case DB_ENERGY:   return "Energie";
+        case DB_ENERGY:   return "Stroom";
+        case DB_GAS:      return "Gas";
     }
     return "?";
 }

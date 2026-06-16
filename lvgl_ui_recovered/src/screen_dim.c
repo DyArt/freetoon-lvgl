@@ -786,7 +786,10 @@ lv_obj_t * screen_dim_create(void) {
     lv_label_set_text(dim_vent_lbl, "-- %");
     lv_obj_set_style_text_align(dim_vent_lbl, LV_TEXT_ALIGN_CENTER, 0);
     lv_obj_set_width(dim_vent_lbl, vbw - 4);
-    lv_obj_align(dim_vent_lbl, LV_ALIGN_TOP_MID, 0, 52);
+    /* The fan IMG object is 80px tall (zoom only shrinks the drawn pixels, not
+     * the layout box), so the label must clear y=88, not y=52, or it lands on
+     * the fan — same offset the waste block uses for its 80px bin glyph. */
+    lv_obj_align(dim_vent_lbl, LV_ALIGN_TOP_MID, 0, 84);
     lv_obj_add_flag(dim_vent_lbl, LV_OBJ_FLAG_HIDDEN);
 
     /* ---- FAMILY: Life360 lines stacked, right-aligned ---- */

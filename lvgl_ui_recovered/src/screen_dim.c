@@ -84,10 +84,9 @@ static lv_obj_t * dim_box(int id, int * ow, int * oh) {
  * and so overlapped whatever blocks landed at the edges (vent on the left, the
  * forecast strip at the bottom). Now it's a normal dim block (DB_ENERGY) with
  * two labelled horizontal mini-bars; gated by the existing show_dim_bars toggle. */
-static lv_obj_t * en_hdr;
 static lv_obj_t * en_pwr_track, * en_pwr_fill, * en_pwr_lbl;
 static lv_obj_t * en_gas_track, * en_gas_fill, * en_gas_lbl;
-static int   en_track_w = 0;        /* mini-bar track width (px, set at create) */
+static int   en_pwr_w = 0, en_gas_w = 0;   /* mini-bar track widths (px, set at create) */
 #define DIM_E_FULL_W    5000.0f     /* power at a full bar (fixed scale) */
 #define DIM_G_FULL_M3H  2.0f        /* gas (m³/h) at a full bar (fixed scale) */
 
@@ -241,11 +240,11 @@ static void refresh_cb(lv_timer_t * t) {
                 snprintf(co2,  sizeof co2,  "CO2 %d ppm", toon_state.eco2);
             const char * aql = air_quality_label(toon_state.eco2, toon_state.tvoc);
             if (*aql)
-                snprintf(buf, sizeof buf, tr("%s    %s    %s    Lucht: %s",
-                                              "%s    %s    %s    Air: %s"),
+                snprintf(buf, sizeof buf, tr("%s  %s  %s  Lucht: %s",
+                                              "%s  %s  %s  Air: %s"),
                          tvoc, co2, bar, aql);
             else
-                snprintf(buf, sizeof buf, "%s    %s    %s", tvoc, co2, bar);
+                snprintf(buf, sizeof buf, "%s  %s  %s", tvoc, co2, bar);
 #else
             snprintf(buf, sizeof buf, "%s", bar);
 #endif
@@ -563,15 +562,15 @@ static void refresh_cb(lv_timer_t * t) {
         char gtxt[24];
         snprintf(gtxt, sizeof gtxt, "%.2f m3/h", g);
 
-        en_set_bar(en_pwr_fill, en_pwr_lbl, en_track_w, e / DIM_E_FULL_W,
+        en_set_bar(en_pwr_fill, en_pwr_lbl, en_pwr_w, e / DIM_E_FULL_W,
                    e_conn ? etxt : tr("-- W", "-- W"));
-        en_set_bar(en_gas_fill, en_gas_lbl, en_track_w, g / DIM_G_FULL_M3H,
+        en_set_bar(en_gas_fill, en_gas_lbl, en_gas_w, g / DIM_G_FULL_M3H,
                    g_conn ? gtxt : tr("-- m3/h", "-- m3/h"));
 
-        /* show_dim_bars off → hide the block's contents (block visibility in the
-         * dim layout is handled separately by hiding the whole box at create). */
+        /* show_dim_bars off → hide both blocks' contents (per-block visibility in
+         * the dim layout is handled separately by hiding the whole box at create). */
         int show = settings.show_dim_bars;
-        lv_obj_t * en_parts[] = { en_hdr, en_pwr_track, en_gas_track, en_pwr_lbl, en_gas_lbl };
+        lv_obj_t * en_parts[] = { en_pwr_track, en_gas_track, en_pwr_lbl, en_gas_lbl };
         for (unsigned i = 0; i < sizeof en_parts / sizeof en_parts[0]; i++)
             if (en_parts[i]) {
                 if (show) lv_obj_clear_flag(en_parts[i], LV_OBJ_FLAG_HIDDEN);
@@ -849,16 +848,15 @@ lv_obj_t * screen_dim_create(void) {
         lv_obj_add_flag(dim_fc_temp[i], LV_OBJ_FLAG_HIDDEN);
     }
 
-    /* ---- ENERGY: power + gas mini-bars in their own grid cell ---- */
-    int ebw = 0, ebh = 0; lv_obj_t * bx_e = dim_box(DB_ENERGY, &ebw, &ebh); (void)ebh;
-    en_track_w = ebw - 8;
-    en_hdr = lv_label_create(bx_e);
-    lv_obj_set_style_text_color(en_hdr, lv_color_hex(0x888888), 0);
-    lv_obj_set_style_text_font(en_hdr, &lv_font_montserrat_18, 0);
-    lv_label_set_text(en_hdr, tr("Energie", "Energy"));
-    lv_obj_align(en_hdr, LV_ALIGN_TOP_LEFT, 4, 2);
-    en_make_bar(bx_e, en_track_w, 28, 0xffffff, &en_pwr_track, &en_pwr_fill, &en_pwr_lbl);
-    en_make_bar(bx_e, en_track_w, 66, 0xffaa33, &en_gas_track, &en_gas_fill, &en_gas_lbl);
+    /* ---- STROOM (power) + GAS: separate single-metric blocks, each a value +
+     * mini-bar. Independent so they can be placed/sized on their own. ---- */
+    int ebw = 0; lv_obj_t * bx_e = dim_box(DB_ENERGY, &ebw, NULL);
+    en_pwr_w = ebw - 8;
+    en_make_bar(bx_e, en_pwr_w, 6, 0xffffff, &en_pwr_track, &en_pwr_fill, &en_pwr_lbl);
+
+    int gbw = 0; lv_obj_t * bx_g = dim_box(DB_GAS, &gbw, NULL);
+    en_gas_w = gbw - 8;
+    en_make_bar(bx_g, en_gas_w, 6, 0xffaa33, &en_gas_track, &en_gas_fill, &en_gas_lbl);
 
     if (!refresh_timer) refresh_timer = lv_timer_create(refresh_cb, 1000, NULL);
     return scr_root;

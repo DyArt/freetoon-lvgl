@@ -21,6 +21,7 @@ settings_t settings = {
     .show_dim_waste    = 1,
     .show_dim_bars     = 1,
     .show_dim_metrics  = 1,
+    .dim_custom_enabled = 0,
     .language          = 0,   /* LANG_NL */
     .dim_bars_swap     = 0,
     .dim_waste_lead_days = 3,
@@ -187,6 +188,7 @@ void settings_load(void) {
         else if (strcmp(k, "show_dim_weather")  == 0) settings.show_dim_weather  = iv;
         else if (strcmp(k, "show_dim_waste")    == 0) settings.show_dim_waste    = iv;
         else if (strcmp(k, "show_dim_bars")     == 0) settings.show_dim_bars     = iv;
+        else if (strcmp(k, "dim_custom_enabled") == 0) settings.dim_custom_enabled = iv;
         else if (strcmp(k, "show_dim_metrics")  == 0) settings.show_dim_metrics  = iv;
         else if (strcmp(k, "language")          == 0) settings.language          = iv;
         else if (strcmp(k, "dim_bars_swap")     == 0) settings.dim_bars_swap     = iv;
@@ -537,6 +539,7 @@ void settings_save(void) {
     fprintf(f, "show_dim_weather=%d\n",  settings.show_dim_weather);
     fprintf(f, "show_dim_waste=%d\n",    settings.show_dim_waste);
     fprintf(f, "show_dim_bars=%d\n",     settings.show_dim_bars);
+    fprintf(f, "dim_custom_enabled=%d\n", settings.dim_custom_enabled);
     fprintf(f, "show_dim_metrics=%d\n",  settings.show_dim_metrics);
     fprintf(f, "language=%d\n",           settings.language);
     fprintf(f, "dim_bars_swap=%d\n",     settings.dim_bars_swap);

@@ -49,6 +49,7 @@ static lv_obj_t * scr_root = NULL;
 
 /* Big thermostat tile widgets — updated by refresh timer */
 static lv_obj_t * lbl_t_clock;
+static lv_obj_t * lbl_t_clock_colon = NULL;   /* pulsing ":" overlay */
 static lv_obj_t * lbl_t_temp;
 static lv_obj_t * lbl_t_setpoint;
 static lv_obj_t * lbl_t_burner;
@@ -1446,7 +1447,7 @@ static void refresh_cb(lv_timer_t * t) {
     struct tm tm;
     localtime_r(&now, &tm);
     char clk[16];
-    strftime(clk, sizeof(clk), "%H:%M", &tm);
+    strftime(clk, sizeof(clk), "%H %M", &tm);   /* space; pulsing colon overlays */
     lv_label_set_text(lbl_t_clock, clk);
     if (lbl_t_date) {
         char dt[48];
@@ -2885,8 +2886,17 @@ lv_obj_t * screen_home_create(void) {
     lbl_t_clock = lv_label_create(th);
     lv_obj_set_style_text_color(lbl_t_clock, lv_color_hex(COL_TEXT_HI), 0);
     lv_obj_set_style_text_font(lbl_t_clock, SF(28), 0);
-    lv_label_set_text(lbl_t_clock, "--:--");
+    lv_label_set_text(lbl_t_clock, "-- --");
     lv_obj_align(lbl_t_clock, LV_ALIGN_TOP_LEFT, clock_dx, 0);
+
+    /* Pulsing ":" overlay centred on the clock (in the "HH MM" middle space) —
+     * separate label so the digits don't jitter as the colon fades. */
+    lbl_t_clock_colon = lv_label_create(th);
+    lv_obj_set_style_text_color(lbl_t_clock_colon, lv_color_hex(COL_TEXT_HI), 0);
+    lv_obj_set_style_text_font(lbl_t_clock_colon, SF(28), 0);
+    lv_label_set_text(lbl_t_clock_colon, ":");
+    lv_obj_align_to(lbl_t_clock_colon, lbl_t_clock, LV_ALIGN_CENTER, 0, 0);
+    clock_colon_pulse(lbl_t_clock_colon);
 
     /* Date directly under the clock so the top-left corner is a full
        date+time block. */

@@ -1654,8 +1654,13 @@ static void on_news_speed_change(lv_event_t * e) {
 static lv_obj_t * sw_cal = NULL;
 static lv_obj_t * ta_cal_ha = NULL;
 static lv_obj_t * ta_cal_ics = NULL;
+static lv_obj_t * sw_cal_notify = NULL;
+static lv_obj_t * ta_cal_lead = NULL;
 static void on_cal_enabled_change(lv_event_t * e) {
     settings.calendar_enabled = lv_obj_has_state(lv_event_get_target(e), LV_STATE_CHECKED) ? 1 : 0;
+}
+static void on_cal_notify_change(lv_event_t * e) {
+    settings.calendar_notify_enabled = lv_obj_has_state(lv_event_get_target(e), LV_STATE_CHECKED) ? 1 : 0;
 }
 static void on_cal_open_click(lv_event_t * e) { (void)e; screen_calendar_show(); }
 static void open_layout_editor(lv_event_t * e) { (void)e; screen_layout_editor_show(); }
@@ -1666,6 +1671,9 @@ static void on_cal_save_click(lv_event_t * e) {
         snprintf(settings.calendar_ha_entity, sizeof settings.calendar_ha_entity, "%s", v ? v : ""); }
     if (ta_cal_ics) { const char * v = lv_textarea_get_text(ta_cal_ics);
         snprintf(settings.calendar_ics_url, sizeof settings.calendar_ics_url, "%s", v ? v : ""); }
+    if (ta_cal_lead) { const char * v = lv_textarea_get_text(ta_cal_lead);
+        int m = v ? atoi(v) : 15; if (m < 1) m = 1; if (m > 1440) m = 1440;
+        settings.calendar_notify_lead_min = m; }
     settings_save();
     calendar_refresh_async();          /* off-thread fetch so the UI stays responsive */
 }
@@ -1706,6 +1714,26 @@ static void open_calendar_modal(lv_event_t * e) {
     lv_textarea_set_placeholder_text(ta_cal_ics, "https://… .ics");
     lv_textarea_set_text(ta_cal_ics, settings.calendar_ics_url);
     y += 60;
+
+    /* Notifications: pop a Toon notification N minutes before a timed event. */
+    lv_obj_t * rn = panel_row(p, y, tr("Meldingen", "Notifications"), NULL);
+    sw_cal_notify = row_switch(rn, settings.calendar_notify_enabled, on_cal_notify_change);
+    y += 90;
+
+    lv_obj_t * l3 = lv_label_create(p);
+    lv_obj_set_style_text_color(l3, lv_color_hex(0xffffff), 0);
+    lv_obj_set_style_text_font(l3, SF(18), 0);
+    lv_label_set_text(l3, tr("Minuten van tevoren:", "Minutes before:"));
+    lv_obj_align(l3, LV_ALIGN_TOP_LEFT, SX(4), y + SY(8));
+    ta_cal_lead = lv_textarea_create(p);
+    lv_obj_set_size(ta_cal_lead, SX(120), SY(44));
+    lv_obj_align(ta_cal_lead, LV_ALIGN_TOP_LEFT, SX(300), y);
+    lv_textarea_set_one_line(ta_cal_lead, true);
+    lv_textarea_set_accepted_chars(ta_cal_lead, "0123456789");
+    lv_textarea_set_max_length(ta_cal_lead, 4);
+    char leadbuf[8]; snprintf(leadbuf, sizeof leadbuf, "%d", settings.calendar_notify_lead_min);
+    lv_textarea_set_text(ta_cal_lead, leadbuf);
+    y += 64;
 
     lv_obj_t * saveb = lv_btn_create(p);
     lv_obj_set_size(saveb, SX(150), SY(46));

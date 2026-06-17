@@ -18,6 +18,8 @@
 #include "settings.h"
 #include "http.h"
 #include "homeassistant.h"
+#include "notify.h"
+#include "i18n.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -609,11 +611,70 @@ void calendar_refresh_async(void) {
     if (pthread_create(&t, NULL, kick_thread, NULL) == 0) pthread_detach(t);
 }
 
+/* ---- pre-event notifications ---------------------------------------------
+ * Pop a Toon notification N minutes before a timed event starts. Checked on a
+ * ~30 s tick (the event list itself only refreshes every 30 min). Each event is
+ * notified at most once; fired keys are remembered until their start time has
+ * passed so a weekly series re-notifies next week (different date = new key). */
+#define CAL_NOTIFIED_MAX 32
+static struct { char key[100]; time_t when; } g_notified[CAL_NOTIFIED_MAX];
+static int g_notified_n = 0;
+
+static time_t event_epoch(const char * date, const char * tm) {
+    struct tm t; memset(&t, 0, sizeof t);
+    t.tm_year = atoin(date, 4) - 1900; t.tm_mon = atoin(date + 5, 2) - 1; t.tm_mday = atoin(date + 8, 2);
+    t.tm_hour = atoin(tm, 2);          t.tm_min = atoin(tm + 3, 2);        t.tm_isdst = -1;
+    return mktime(&t);                  /* local wall-clock → epoch */
+}
+
+static void calendar_check_notifications(void) {
+    if (!settings.calendar_enabled || !settings.calendar_notify_enabled) return;
+    int lead = settings.calendar_notify_lead_min; if (lead <= 0) lead = 15;
+    time_t now = time(NULL);
+
+    /* drop remembered keys whose event has already started (minus a 60 s grace) */
+    int w = 0;
+    for (int i = 0; i < g_notified_n; i++)
+        if (g_notified[i].when > now - 60) g_notified[w++] = g_notified[i];
+    g_notified_n = w;
+
+    for (int i = 0; i < calendar_state.count; i++) {
+        calendar_event_t * ev = &calendar_state.ev[i];
+        if (!ev->time[0]) continue;                          /* timed events only */
+        time_t st = event_epoch(ev->date, ev->time);
+        if (st == (time_t)-1) continue;
+        long secs = (long)(st - now);
+        if (secs < 0 || secs > (long)lead * 60) continue;    /* already started, or outside window */
+        long mins = (secs + 59) / 60;                        /* round up: 9m30s reads "10 min" */
+
+        char key[100];
+        snprintf(key, sizeof key, "%s %s %s", ev->date, ev->time, ev->summary);
+        int seen = 0;
+        for (int j = 0; j < g_notified_n; j++) if (!strcmp(g_notified[j].key, key)) { seen = 1; break; }
+        if (seen) continue;
+
+        char text[180];
+        if (secs <= 60) snprintf(text, sizeof text, "%s %s", ev->summary, tr("begint zo", "starts now"));
+        else snprintf(text, sizeof text, "%s %s %ld %s (%s)",
+                      ev->summary, tr("over", "in"), mins, tr("min", "min"), ev->time);
+        notify_show("calendar", key, text);
+
+        if (g_notified_n < CAL_NOTIFIED_MAX) {
+            snprintf(g_notified[g_notified_n].key, sizeof g_notified[0].key, "%s", key);
+            g_notified[g_notified_n].when = st;
+            g_notified_n++;
+        }
+    }
+}
+
 static void * cal_thread(void * arg) {
     (void)arg;
+    int since_refresh = 100000;          /* force a full fetch on the first tick */
     for (;;) {
-        calendar_refresh_now();
-        sleep(1800);                    /* 30 min — calendars change slowly */
+        if (since_refresh >= 1800) { calendar_refresh_now(); since_refresh = 0; }  /* 30 min */
+        calendar_check_notifications();  /* minute-resolution pre-event alerts */
+        sleep(30);
+        since_refresh += 30;
     }
     return NULL;
 }

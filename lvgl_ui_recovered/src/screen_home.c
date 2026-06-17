@@ -1164,6 +1164,63 @@ static void apply_offline_tile_visibility(void) {
     }
 }
 
+static int render_tile_slot(int slot, lv_obj_t * lbl_main, lv_obj_t * lbl_sub);  /* fwd */
+
+/* Agenda overlay for the 4 swappable right-column tiles (ENERGY/FAMILY/VENT/
+ * WATER). An opaque label that covers the tile body and lists upcoming events
+ * when that slot is bound to "local:agenda" — shown/hidden in refresh_cb. */
+static lv_obj_t * slot_agenda[4] = {0};
+
+static lv_obj_t * make_slot_agenda(lv_obj_t * tile, uint32_t bg) {
+    if (!tile) return NULL;
+    lv_obj_t * l = lv_label_create(tile);
+    lv_obj_set_style_bg_color(l, lv_color_hex(bg), 0);
+    lv_obj_set_style_bg_opa(l, LV_OPA_COVER, 0);
+    lv_obj_set_style_radius(l, 10, 0);
+    lv_obj_set_style_pad_all(l, SX(8), 0);
+    lv_obj_set_style_text_color(l, lv_color_hex(COL_TEXT_HI), 0);
+    lv_obj_set_style_text_font(l, SF(15), 0);
+    lv_label_set_long_mode(l, LV_LABEL_LONG_WRAP);
+    lv_obj_set_size(l, LV_PCT(100), LV_PCT(100));
+    lv_obj_align(l, LV_ALIGN_TOP_LEFT, 0, 0);
+    lv_obj_add_flag(l, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_move_foreground(l);                 /* cover the tile's own widgets */
+    return l;
+}
+
+/* Fill an agenda overlay with a heading + the next few events. */
+static void fill_agenda_overlay(lv_obj_t * l) {
+    if (!l) return;
+    char buf[420] = "";
+    int nn = calendar_state.count; if (nn > 4) nn = 4;
+    for (int i = 0; i < nn; i++) {
+        calendar_event_t * ev = &calendar_state.ev[i];
+        char line[120];
+        snprintf(line, sizeof line, "%s %s %s\n",
+                 ev->date + 5, ev->time[0] ? ev->time : "", ev->summary);   /* MM-DD */
+        strncat(buf, line, sizeof buf - strlen(buf) - 1);
+    }
+    char out[480];
+    snprintf(out, sizeof out, "%s\n%s", tr("Agenda", "Calendar"),
+             buf[0] ? buf : (settings.calendar_enabled ? tr("Geen afspraken", "No events")
+                                                       : tr("Agenda uit", "Calendar off")));
+    lv_label_set_text(l, out);
+}
+
+/* Either render the agenda overlay (when the slot is bound to "local:agenda")
+ * or hide it and fall back to the normal integration/built-in render. Returns 1
+ * when the slot is "active" (built-in refresh should be skipped). */
+static int slot_render_or_agenda(int slot, int ai, lv_obj_t * lbl_main, lv_obj_t * lbl_sub) {
+    const char * b = tile_slots_binding(slot);
+    if (b && !strcmp(b, "local:agenda")) {
+        fill_agenda_overlay(slot_agenda[ai]);
+        if (slot_agenda[ai]) { lv_obj_clear_flag(slot_agenda[ai], LV_OBJ_FLAG_HIDDEN); lv_obj_move_foreground(slot_agenda[ai]); }
+        return 1;
+    }
+    if (slot_agenda[ai]) lv_obj_add_flag(slot_agenda[ai], LV_OBJ_FLAG_HIDDEN);
+    return render_tile_slot(slot, lbl_main, lbl_sub);
+}
+
 /* Render an integration's latest_value/subtitle into the given pair of
  * labels. Returns 1 if a binding existed (caller should skip the built-in
  * refresh path), 0 otherwise. */
@@ -1311,13 +1368,13 @@ static void refresh_cb(lv_timer_t * t) {
      * buttons/fan stay visible (no separate hide pass) — accepted UX
      * trade-off for keeping refresh logic local. */
     int slot_active[TILE_SLOT_COUNT] = {0};
-    slot_active[TILE_SLOT_ENERGY] = render_tile_slot(TILE_SLOT_ENERGY,
+    slot_active[TILE_SLOT_ENERGY] = slot_render_or_agenda(TILE_SLOT_ENERGY, 0,
                                                     lbl_energy_w, lbl_energy_gas);
-    slot_active[TILE_SLOT_FAMILY] = render_tile_slot(TILE_SLOT_FAMILY,
+    slot_active[TILE_SLOT_FAMILY] = slot_render_or_agenda(TILE_SLOT_FAMILY, 1,
                                                     lbl_life360_a, lbl_life360_b);
-    slot_active[TILE_SLOT_VENT]   = render_tile_slot(TILE_SLOT_VENT,
+    slot_active[TILE_SLOT_VENT]   = slot_render_or_agenda(TILE_SLOT_VENT, 2,
                                                     lbl_boiler_state, lbl_boiler_pressure);
-    slot_active[TILE_SLOT_WATER]  = render_tile_slot(TILE_SLOT_WATER,
+    slot_active[TILE_SLOT_WATER]  = slot_render_or_agenda(TILE_SLOT_WATER, 3,
                                                     lbl_inbox_main, lbl_inbox_sub);
 
     /* Page-1 (swipe) slots — render the bound integration, or a placeholder. */
@@ -3255,6 +3312,7 @@ lv_obj_t * screen_home_create(void) {
     make_tile(scr_root, 790, 20, 214, 130, LT_ENERGY, tr("Energie", "Energy"), 0xaa77ff,
               open_stats, &energy_t);
     tile_energy = energy_t.tile;
+    slot_agenda[0] = make_slot_agenda(tile_energy, 0x4477cc);
     /* Compressed for the new 130-px tile: 28-pt W value (was 48), gas
      * total on the same baseline range below. */
     lbl_energy_w = lv_label_create(energy_t.tile);
@@ -3284,6 +3342,7 @@ lv_obj_t * screen_home_create(void) {
     make_tile(scr_root, 560, 230, 220, 200, LT_VENT, tr("Ventilatie", "Vent"), 0x66bbdd,
               (lv_event_cb_t)open_vent, &vent);
     tile_vent = vent.tile;
+    slot_agenda[2] = make_slot_agenda(tile_vent, 0x4477cc);
 
     /* Speed % shares the title row with the "Vent" label so the
        top-row buttons can sit cleanly below without overlap. */
@@ -3368,6 +3427,7 @@ lv_obj_t * screen_home_create(void) {
     make_tile(scr_root, 790, 160, 214, 130, LT_FAMILY, tr("Familie", "Family"), 0xff8866,
               open_family_map, &family_t);
     tile_family = family_t.tile;
+    slot_agenda[1] = make_slot_agenda(tile_family, 0x4477cc);
     /* Two scrolling labels — the formatted address ("City > Street > Num")
      * almost always exceeds the 194-px tile width, so we use
      * SCROLL_CIRCULAR to slide the full string through the label area
@@ -3431,6 +3491,7 @@ lv_obj_t * screen_home_create(void) {
         lv_obj_align(ll, LV_ALIGN_CENTER, 0, 6);
     }
     tile_water = water_t.tile;
+    slot_agenda[3] = make_slot_agenda(tile_water, 0x4477cc);
 
     /* Long-press on any of the four right-column tiles → tile-slots picker.
      * Same modal as Settings → Tiles. Cheap to attach; the handler only

@@ -2256,8 +2256,11 @@ static lv_obj_t * dd_tile_slot[TILE_SLOT_COUNT];
 /* Build the option string for the rollers: "Built-in\n<name>\n<name>...".
  * Output buffer is owned by caller and must be large enough — 64 chars per
  * integration + 1 for separator. */
+/* Index 0 = "Built-in" (empty binding), index 1 = the calendar agenda
+ * ("local:agenda"), then the marketplace integrations. */
 static void build_slot_options(char * out, size_t cap) {
-    size_t n = snprintf(out, cap, "%s", tr("Ingebouwd", "Built-in"));
+    size_t n = snprintf(out, cap, "%s\n%s", tr("Ingebouwd", "Built-in"),
+                        tr("Agenda", "Calendar"));
     int total = tile_slots_integration_count();
     for (int i = 0; i < total && n + INTEG_NAME_MAX + 2 < cap; i++) {
         const integration_meta_t * m = tile_slots_integration_at(i);
@@ -2266,20 +2269,22 @@ static void build_slot_options(char * out, size_t cap) {
     }
 }
 
-/* Resolve dropdown index → integration id for the given slot. Index 0 is
- * the "Built-in" sentinel (empty string). */
+/* Resolve dropdown index → binding id for the given slot. 0 = Built-in (empty),
+ * 1 = "local:agenda", 2.. = integrations. */
 static const char * slot_dropdown_to_id(int idx) {
     if (idx <= 0) return "";
-    const integration_meta_t * m = tile_slots_integration_at(idx - 1);
+    if (idx == 1) return "local:agenda";
+    const integration_meta_t * m = tile_slots_integration_at(idx - 2);
     return m ? m->id : "";
 }
 
 static int slot_dropdown_from_id(const char * id) {
     if (!id || !id[0]) return 0;
+    if (strcmp(id, "local:agenda") == 0) return 1;
     int total = tile_slots_integration_count();
     for (int i = 0; i < total; i++) {
         const integration_meta_t * m = tile_slots_integration_at(i);
-        if (strcmp(m->id, id) == 0) return i + 1;
+        if (strcmp(m->id, id) == 0) return i + 2;
     }
     return 0;
 }
@@ -2312,24 +2317,9 @@ static void open_tile_slots_modal(lv_event_t * e) {
     (void)e;
     lv_obj_t * p = modal_open(tr("Tegelslots", "Tile slots"), 500);
 
-    if (tile_slots_integration_count() == 0) {
-        lv_obj_t * msg = lv_label_create(p);
-        lv_obj_set_style_text_font(msg, SF(22), 0);
-        lv_obj_set_style_text_color(msg, lv_color_hex(0x88aabb), 0);
-        lv_obj_set_width(msg, SX(800));
-        lv_label_set_long_mode(msg, LV_LABEL_LONG_WRAP);
-        lv_label_set_text(msg,
-            tr("Nog geen marketplace-integraties geïnstalleerd. Open de "
-               "Marketplace om er een toe te voegen en kom dan terug om die "
-               "aan een tegel toe te wijzen.",
-               "No marketplace integrations installed yet. Open the "
-               "Marketplace to add one, then come back here to assign it "
-               "to a tile."));
-        lv_obj_align(msg, LV_ALIGN_TOP_LEFT, SX(4), SY(80));
-        marketplace_button(p);
-        return;
-    }
-
+    /* Built-in + Agenda are always assignable, so the dropdowns always show —
+     * even with no marketplace integrations (the Marketplace button still lets
+     * the user add more). */
     static char options[2048];
     build_slot_options(options, sizeof options);
 

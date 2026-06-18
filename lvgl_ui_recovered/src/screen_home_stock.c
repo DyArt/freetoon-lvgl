@@ -61,9 +61,9 @@ typedef enum {
     TT_AGENDA, TT_COUNT
 } ttype_t;
 static const struct { const char * key; const char * nl; const char * en; int link; } TM[TT_COUNT] = {
-    { "empty",   "Leeg",          "Empty",        LINK_NONE     },
+    { "empty",   "Verwijderen",   "Remove",       LINK_NONE     },
     { "clock",   "Klok",          "Clock",        LINK_NONE     },
-    { "humid",   "Vocht",         "Humidity",     LINK_NONE     },
+    { "humid",   "Luchtvochtigheid", "Humidity",  LINK_NONE     },
     { "power",   "Stroom nu",     "Power now",    LINK_STATS    },
     { "waterp",  "Waterdruk",     "Water pres.",  LINK_STATS    },
     { "indoor",  "Binnen",        "Indoor",       LINK_HEATER   },

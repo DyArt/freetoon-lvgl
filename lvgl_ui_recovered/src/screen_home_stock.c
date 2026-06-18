@@ -154,7 +154,22 @@ static void on_apps_grid(lv_event_t * e) { (void)e; ui_push(screen_settings_crea
 
 /* Tap-through: a tile opens its detail/graph screen, like the stock qt-gui. */
 enum { LINK_STATS = 1, LINK_FORECAST, LINK_HEATER, LINK_VENT };
+/* Press point, so we can tell a tap from a swipe (a flick that snaps the
+ * carousel must NOT also fire the tile's navigation). */
+static lv_point_t g_press_pt;
+static void on_tile_press(lv_event_t * e) {
+    (void)e;
+    lv_indev_t * in = lv_indev_get_act();
+    if (in) lv_indev_get_point(in, &g_press_pt);
+}
 static void on_tile_link(lv_event_t * e) {
+    lv_indev_t * in = lv_indev_get_act();
+    if (in) {                       /* moved much → it was a swipe, ignore */
+        lv_point_t p; lv_indev_get_point(in, &p);
+        long dx = p.x - g_press_pt.x, dy = p.y - g_press_pt.y;
+        long lim = SX(26);
+        if (dx * dx + dy * dy > lim * lim) return;
+    }
     switch ((int)(intptr_t)lv_event_get_user_data(e)) {
         case LINK_STATS:    ui_push(screen_stats_create());           break;
         case LINK_FORECAST: ui_push(screen_forecast_create());        break;
@@ -162,10 +177,11 @@ static void on_tile_link(lv_event_t * e) {
         case LINK_VENT:     ui_push(screen_vent_advanced_create());   break;
     }
 }
-/* Make a card tappable → detail screen. Inside the swipeable tileview a tap
- * (no drag) fires CLICKED while a drag still scrolls pages. */
+/* Make a card tappable → detail screen. A drag scrolls the carousel; only a
+ * tap (press+release within ~26px) navigates. */
 static void tile_link(lv_obj_t * card, int code) {
     lv_obj_add_flag(card, LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_add_event_cb(card, on_tile_press, LV_EVENT_PRESSED, NULL);
     lv_obj_add_event_cb(card, on_tile_link, LV_EVENT_CLICKED, (void *)(intptr_t)code);
 }
 

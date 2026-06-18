@@ -101,7 +101,10 @@ static void d_refresh(lv_timer_t * t) {
     if (toon_state.indoor_temp > 0) { snprintf(b, sizeof b, LV_SYMBOL_RIGHT "  %.1f°", toon_state.indoor_temp); d_comma(b); }
     else strcpy(b, LV_SYMBOL_RIGHT "  --");
     lv_label_set_text(d_eco, b);
-    lv_label_set_text(d_prog, program_label());
+    /* "Continue on X,X" — stock Toon wording for the held setpoint. */
+    { char sp[16]; snprintf(sp, sizeof sp, "%.1f", toon_state.setpoint); d_comma(sp);
+      snprintf(b, sizeof b, tr("Verder op %s", "Continue on %s"), sp);
+      lv_label_set_text(d_prog, b); }
 
     /* energy bar */
     float w = d_power_w(); if (w < 0) w = 0;

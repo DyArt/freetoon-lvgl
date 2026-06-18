@@ -28,6 +28,7 @@
 #include "tile_slots.h"
 #include "news.h"
 #include "wastecollection.h"
+#include "update_check.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -2418,7 +2419,7 @@ void screen_settings_open_tile_slots_modal(void) {
 
 static void open_about_modal(lv_event_t * e) {
     (void)e;
-    lv_obj_t * p = modal_open(tr("Over", "About"), 320);
+    lv_obj_t * p = modal_open(tr("Over", "About"), 490);
 
     /* Same identity as the home ft-logo modal so both Abouts read identically:
        freetoon · version · beta · author/MIT, then the live update status. */
@@ -2444,6 +2445,35 @@ static void open_about_modal(lv_event_t * e) {
     lv_obj_set_style_text_color(lbl_about_status, lv_color_hex(0xffffff), 0);
     lv_obj_set_style_text_font(lbl_about_status, SF(18), 0);
     lv_obj_align(lbl_about_status, LV_ALIGN_TOP_LEFT, SX(4), SY(150));
+
+    /* Version history (recent releases, newest first) — scrollable. This is the
+       theme-independent way to see the changelog in-app: the stock home has no
+       logo/banner entry to the rich home About modal, but Settings is reachable
+       on every theme. Populated by the update poll; shows a hint until then. */
+    lv_obj_t * hist_hdr = lv_label_create(p);
+    lv_obj_set_style_text_color(hist_hdr, lv_color_hex(0x88aabb), 0);
+    lv_obj_set_style_text_font(hist_hdr, SF(15), 0);
+    lv_label_set_text(hist_hdr, tr("Versiegeschiedenis", "Version history"));
+    lv_obj_align(hist_hdr, LV_ALIGN_TOP_LEFT, SX(4), SY(252));
+
+    lv_obj_t * clbox = lv_obj_create(p);
+    lv_obj_set_size(clbox, SX(300), SY(196));
+    lv_obj_align(clbox, LV_ALIGN_TOP_LEFT, SX(4), SY(278));
+    lv_obj_set_style_bg_color(clbox, lv_color_hex(0x0e1a2a), 0);
+    lv_obj_set_style_border_width(clbox, 0, 0);
+    lv_obj_set_style_radius(clbox, 8, 0);
+    lv_obj_set_style_pad_all(clbox, 10, 0);
+    lv_obj_set_scroll_dir(clbox, LV_DIR_VER);
+    lv_obj_set_scrollbar_mode(clbox, LV_SCROLLBAR_MODE_AUTO);
+    lv_obj_t * cl = lv_label_create(clbox);
+    lv_obj_set_style_text_font(cl, SF(15), 0);
+    lv_obj_set_style_text_color(cl, lv_color_hex(0xc8d4e0), 0);
+    lv_label_set_long_mode(cl, LV_LABEL_LONG_WRAP);
+    lv_obj_set_width(cl, SX(278));
+    lv_label_set_text(cl, g_update_state.changelog[0]
+        ? g_update_state.changelog
+        : tr("Verschijnt na de eerste update-controle.",
+             "Appears after the first update check."));
 
     about_tick();
     modal_tick_fn = about_tick;

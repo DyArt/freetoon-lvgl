@@ -102,6 +102,12 @@ CFLAGS  := $(SYSROOTFLAG) $(ARCHFLAGS) -O2 -Wall -Wextra -Wno-unused-parameter -
            -MMD -MP
 LDFLAGS := $(SYSROOTFLAG) $(ARCHFLAGS) -pthread -lm -lrt $(GLIBC_LDFLAGS)
 
+# Local patches to the read-only lvgl submodule, reapplied idempotently here so a
+# fresh `git submodule update` / clone doesn't silently revert them. Currently:
+# the no-global-color-table GIF fix the buienradar radar map depends on (without
+# it lv_gif_set_src fails and the radar tile is blank).
+$(shell grep -q has_gct lvgl/src/extra/libs/gif/gifdec.c 2>/dev/null || (cd lvgl && patch -p1 < ../patches/lvgl-gifdec-nogct.patch >/dev/null 2>&1))
+
 # Sources
 LVGL_SRC      := $(shell find lvgl/src -name '*.c')
 APP_SRC       := $(ENTRY) $(GLIBC_SRC) boxtalk.c ui_stack.c screen_home.c screen_home_stock.c screen_dim_stock.c screen_thermostat.c \

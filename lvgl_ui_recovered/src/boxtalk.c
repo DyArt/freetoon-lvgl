@@ -218,6 +218,15 @@ static int elem_text_float(const char* xml, const char* elem, float* out) {
 #define UUID_THERMSTAT  "b822de89-ecbd-4f6f-9fd2-5cac18fc06c4"
 #define UUID_BOILER     "6ecc08b0-1e18-42d5-9725-46db009d1a00"
 
+/* The happ_thermstat ThermostatInfo *publisher* uuid is DYNAMIC (regenerated each
+ * happ start, e.g. e7b8a710-… / 4eb79be8-…) — NOT the hardcoded THERMSTAT_UUID we
+ * use as a query destination. BoilerChPressure only arrives via a rare change-notify,
+ * and the startup query to the stale hardcoded uuid never answers, so the pressure
+ * tile sits at "-- bar" until a notify happens to fire. Learn the live uuid here and
+ * re-query the pressure against it until it's seeded. */
+static char g_therm_pub[64] = {0};
+static int send_query(const char* destuuid, const char* service, const char* state_var);
+
 static void handle_notify(const char* xml) {
     char sid[128];
     if (!attr_value(xml, "serviceid", sid, sizeof(sid))) return;
@@ -262,6 +271,17 @@ static void handle_notify(const char* xml) {
         }
     } else if (strcmp(tail, "ThermostatInfo") == 0) {
         float v;
+        /* Learn the live (dynamic) thermostat publisher uuid, and while the CH
+         * pressure is still unseeded, re-query it against THIS uuid — the stale
+         * hardcoded startup query never answers. Capped so we don't query forever. */
+        if (src_uuid[0]) {
+            snprintf(g_therm_pub, sizeof g_therm_pub, "%s", src_uuid);
+            static int seed_tries = 0;
+            if (toon_state.water_pressure <= 0.05f && seed_tries < 10) {
+                seed_tries++;
+                send_query(g_therm_pub, "ThermostatInfo", "BoilerChPressure");
+            }
+        }
         /* Indoor room temperature — happ_thermstat (UUID_THERMSTAT) pushes
          * this on every measurable change. Was being silently dropped on
          * this notify path; without it the dim/home screens fell back to

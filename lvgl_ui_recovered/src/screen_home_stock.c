@@ -383,7 +383,15 @@ static void save_layout(void) {
 }
 
 /* ---- tile picker --------------------------------------------------------- */
-static void picker_close(void) { if (g_picker) { lv_obj_del(g_picker); g_picker = NULL; } g_edit_slot = -1; }
+/* Keep the UI marked active while the picker is open so auto-dim doesn't push
+ * the dim screen in behind it while the user is deciding. */
+static lv_timer_t * g_picker_keepalive = NULL;
+static void picker_keepalive(lv_timer_t * t) { (void)t; ui_mark_activity(); }
+static void picker_close(void) {
+    if (g_picker_keepalive) { lv_timer_del(g_picker_keepalive); g_picker_keepalive = NULL; }
+    if (g_picker) { lv_obj_del(g_picker); g_picker = NULL; }
+    g_edit_slot = -1;
+}
 static void on_picker_bg(lv_event_t * e) { (void)e; picker_close(); }
 static void on_picker_pick(lv_event_t * e) {
     int type = (int)(intptr_t)lv_event_get_user_data(e);
@@ -398,6 +406,8 @@ static void on_picker_pick(lv_event_t * e) {
 static void open_picker(int slot) {
     if (g_picker) picker_close();
     g_edit_slot = slot;
+    ui_mark_activity();   /* and keep it awake while open */
+    g_picker_keepalive = lv_timer_create(picker_keepalive, 2000, NULL);
     g_picker = lv_obj_create(lv_layer_top());
     lv_obj_set_size(g_picker, LV_PCT(100), LV_PCT(100));
     lv_obj_set_style_bg_color(g_picker, lv_color_hex(0x000000), 0);
@@ -531,7 +541,8 @@ lv_obj_t * screen_home_stock_create(void) {
             s->card = lcard(page, q % 2, q / 2);
             lv_obj_add_flag(s->card, LV_OBJ_FLAG_CLICKABLE);
             lv_obj_add_event_cb(s->card, on_tile_press, LV_EVENT_PRESSED, NULL);
-            lv_obj_add_event_cb(s->card, on_slot_click, LV_EVENT_CLICKED, (void *)(intptr_t)i);
+            /* SHORT_CLICKED (not CLICKED) so a long-press doesn't also navigate */
+            lv_obj_add_event_cb(s->card, on_slot_click, LV_EVENT_SHORT_CLICKED, (void *)(intptr_t)i);
             lv_obj_add_event_cb(s->card, on_slot_longpress, LV_EVENT_LONG_PRESSED, (void *)(intptr_t)i);
             render_slot(s);
         }

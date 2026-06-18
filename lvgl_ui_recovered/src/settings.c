@@ -78,6 +78,7 @@ settings_t settings = {
     .calendar_notify_enabled  = 0,
     .calendar_notify_lead_min = 15,
     .home_theme               = 0,
+    .stock_tiles              = "",
     .calendar_ha_entity  = "",
     .calendar_ics_url    = "",
     .custom_layout_enabled = 0,
@@ -285,6 +286,7 @@ void settings_load(void) {
         else if (strcmp(k, "calendar_notify_enabled")  == 0) settings.calendar_notify_enabled = iv;
         else if (strcmp(k, "calendar_notify_lead_min") == 0) settings.calendar_notify_lead_min = iv;
         else if (strcmp(k, "home_theme")         == 0) settings.home_theme = iv;
+        else if (strcmp(k, "stock_tiles")        == 0) snprintf(settings.stock_tiles, sizeof settings.stock_tiles, "%s", v);
         else if (strcmp(k, "calendar_ha_entity") == 0) snprintf(settings.calendar_ha_entity, sizeof settings.calendar_ha_entity, "%s", v);
         else if (strcmp(k, "calendar_ics_url")   == 0) snprintf(settings.calendar_ics_url, sizeof settings.calendar_ics_url, "%s", v);
         else if (strcmp(k, "custom_layout_enabled") == 0) settings.custom_layout_enabled = iv;
@@ -601,6 +603,7 @@ void settings_save(void) {
     fprintf(f, "calendar_enabled=%d\n", settings.calendar_enabled);
     fprintf(f, "calendar_notify_enabled=%d\n", settings.calendar_notify_enabled);
     fprintf(f, "home_theme=%d\n", settings.home_theme);
+    if (settings.stock_tiles[0]) fprintf(f, "stock_tiles=%s\n", settings.stock_tiles);
     fprintf(f, "calendar_notify_lead_min=%d\n", settings.calendar_notify_lead_min);
     fprintf(f, "calendar_ha_entity=%s\n", settings.calendar_ha_entity);
     fprintf(f, "calendar_ics_url=%s\n", settings.calendar_ics_url);

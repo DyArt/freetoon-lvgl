@@ -17,6 +17,8 @@
 #include "settings.h"
 #include "meteradapter.h"
 #include "homewizard.h"
+#include "weather.h"
+#include "icons.h"
 #include <stdio.h>
 #include <string.h>
 #include <time.h>
@@ -30,6 +32,7 @@
 static lv_obj_t * scr_root = NULL;
 static lv_obj_t * d_clock, * d_date, * d_water, * d_water_ts, * d_setpoint, * d_eco, * d_prog;
 static lv_obj_t * d_water_banner, * d_watts;
+static lv_obj_t * d_wx_icon, * d_wx_temp;   /* outside weather, top-right */
 #define D_NSEG 12
 static lv_obj_t * d_eseg[D_NSEG];
 static lv_timer_t * d_timer = NULL;
@@ -109,6 +112,20 @@ static void d_refresh(lv_timer_t * t) {
     { char sp[16]; snprintf(sp, sizeof sp, "%.1f", toon_state.setpoint); d_comma(sp);
       snprintf(b, sizeof b, tr("Verder op %s", "Continue on %s"), sp);
       lv_label_set_text(d_prog, b); }
+
+    /* current outside weather (top-right): white icon + temp, hidden until a
+     * forecast lands or if the dim-weather toggle is off. */
+    if (d_wx_icon && d_wx_temp) {
+        if (settings.show_dim_weather && weather_state.connected) {
+            lv_img_set_src(d_wx_icon, weather_icon_for_lg(weather_state.current_icon));
+            snprintf(b, sizeof b, "%.0f°C", weather_state.current_temp);
+            lv_label_set_text(d_wx_temp, b);
+            lv_obj_clear_flag(d_wx_icon, LV_OBJ_FLAG_HIDDEN);
+        } else {
+            lv_obj_add_flag(d_wx_icon, LV_OBJ_FLAG_HIDDEN);
+            lv_label_set_text(d_wx_temp, "");
+        }
+    }
 
     /* energy bar + live watts number */
     float pw = d_power_w();
@@ -201,6 +218,21 @@ lv_obj_t * screen_dim_stock_create(void) {
     lv_obj_set_pos(sprout, SX(782), SY(386));
     d_prog = d_lbl(scr_root, "", OSR(24), D_WHITE);
     lv_obj_set_pos(d_prog, SX(690), SY(424));
+
+    /* Outside weather, top-right corner — temp left of an all-white 80x80 icon,
+     * mirroring the "Freetoon" brand at top-left. Recolor is set once here so
+     * the icon is always white regardless of the weather type. */
+    /* OSR (regular) font — the OSL light faces are a digits-only subset and lack
+     * the ° and C glyphs (they'd render as missing-glyph boxes). */
+    d_wx_temp = d_lbl(scr_root, "", OSR(30), D_WHITE);
+    lv_obj_set_width(d_wx_temp, SX(150));
+    lv_obj_set_style_text_align(d_wx_temp, LV_TEXT_ALIGN_RIGHT, 0);
+    lv_obj_set_pos(d_wx_temp, SX(762), SY(38));
+    d_wx_icon = lv_img_create(scr_root);
+    lv_obj_set_pos(d_wx_icon, SX(924), SY(12));
+    lv_obj_set_style_img_recolor(d_wx_icon, lv_color_hex(0xffffff), 0);   /* all white */
+    lv_obj_set_style_img_recolor_opa(d_wx_icon, LV_OPA_COVER, 0);
+    lv_obj_add_flag(d_wx_icon, LV_OBJ_FLAG_HIDDEN);
 
     d_refresh(NULL);
     d_timer = lv_timer_create(d_refresh, 1000, NULL);

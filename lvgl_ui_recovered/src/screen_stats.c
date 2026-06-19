@@ -120,10 +120,15 @@ static int load_for_period(void) {
     if (m->local_hist) {                /* CO2/TVOC/pressure — freetoon's recorder */
         series2.n = 0;
         if (m->local_hist == 2) {       /* CH pressure — hourly ring, all periods */
-            long win = (selected_period == PERIOD_HOUR)  ? HOUR
-                     : (selected_period == PERIOD_DAY)   ? DAY
-                     : (selected_period == PERIOD_WEEK)  ? WEEK
-                     : (selected_period == PERIOD_MONTH) ? MONTH : YEAR;
+            /* CH pressure is sampled only ONCE PER HOUR, so a 1-hour window
+             * holds <=1 point and the graph looks empty (the default Hour tab).
+             * Pressure is a slow-moving signal, so widen each period one step:
+             * the buttons select recent->longest trend instead of literal spans.
+             * Hour -> day of data, Day -> week, etc. so no tab is ever empty. */
+            long win = (selected_period == PERIOD_HOUR)  ? DAY
+                     : (selected_period == PERIOD_DAY)   ? WEEK
+                     : (selected_period == PERIOD_WEEK)  ? MONTH
+                     : (selected_period == PERIOD_MONTH) ? YEAR : YEAR;
             return airhist_pres_series(win, 365, &series);
         }
         long win = (selected_period == PERIOD_HOUR) ? HOUR

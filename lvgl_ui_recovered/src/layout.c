@@ -72,8 +72,12 @@ static const layout_tile_t DEFAULTS[] = {
     { LT_FAMILY,        0,   9,  2,  3, 2, 1, -1 },
     { LT_WATER,         0,   9,  4,  3, 2, 1, -1 },
     { LT_THERMOSTAT,    0,   0,  0,  7, 6, 1, -1 },
-    { LT_NEWS_TICKER,   0,   0,  6, 12, 1, 1, -1 },
-    { LT_FORECAST,      0,   0,  7, 12, 1, 1, -1 },
+    /* Ticker overlays the thermostat's bottom row (row 5); the forecast is a
+     * 2-row bar across the bottom (rows 6-7). The forecast needs 2 rows so its
+     * (un-zoomable) weather icons have vertical room next to time/temp/wind —
+     * a 1-row tile collides on the short Toon 1 panel. */
+    { LT_NEWS_TICKER,   0,   0,  5,  7, 1, 1, -1 },
+    { LT_FORECAST,      0,   0,  6, 12, 2, 1, -1 },
     /* news-summary + calendar are NOT preplaced (the grid is full) — add them
      * on demand via the editor's "+ Tegel" button, which drops them in a free
      * cell. */
@@ -105,6 +109,19 @@ void layout_load_named(const char * name) {
     }
     fclose(f);
     if (g_layout.count == 0) layout_reset_default();   /* empty/garbled → defaults */
+
+    /* Migrate older saved layouts where the forecast tile was 1 row tall: its
+     * weather icons can't be SW-zoomed, so a 1-row "Weer" tile overlaps its own
+     * time/temp/wind (very visible on Toon 1). Heal to the 2-row minimum, pulling
+     * the row up if growing it would run off the bottom of the grid. */
+    for (int i = 0; i < g_layout.count; i++) {
+        layout_tile_t * t = &g_layout.tiles[i];
+        if (t->type == LT_FORECAST && t->h < 2) {
+            t->h = 2;
+            if (t->row + t->h > LAYOUT_ROWS) t->row = LAYOUT_ROWS - t->h;
+            if (t->row < 0) t->row = 0;
+        }
+    }
 }
 
 void layout_save_named(const char * name) {
@@ -311,12 +328,18 @@ int layout_reflow_push(layout_t * L, int moved) {
 void layout_type_min(int type, int * min_w, int * min_h) {
     /* {min_w, min_h} in grid cells. Height is the meaningful constraint: data
      * tiles that stack several rows of info need >=3 rows, so they can't be
-     * dropped into a 2-row "Half"/"Breed" tile; ticker/forecast are single-line
-     * strips. Tweak freely — purely a UI guard, not persisted. */
+     * dropped into a 2-row "Half"/"Breed" tile; ticker is a single-line strip;
+     * the forecast renders fine as a single-row bar (the home-screen forecast
+     * scaler shrinks its text to fit), so min_h=1. Tweak freely — purely a UI
+     * guard, not persisted. */
     int w = 2, h = 2;
     switch (type) {
         case LT_THERMOSTAT:   w = 5; h = 4; break;
-        case LT_FORECAST:     w = 4; h = 1; break;
+        case LT_FORECAST:     w = 4; h = 2; break;  /* needs 2 rows: the weather
+                                                       icons can't be zoomed by the
+                                                       SW renderer, so a 1-row tile
+                                                       overlaps icon+time+temp+wind
+                                                       (esp. on Toon 1's 480-px panel). */
         case LT_NEWS_TICKER:  w = 4; h = 1; break;
         case LT_NEWS_SUMMARY: w = 3; h = 3; break;
         case LT_CALENDAR:     w = 3; h = 3; break;
@@ -349,4 +372,92 @@ const char * layout_type_name(int type) {
         case LT_SLOT:        return "Integratie";
         default:             return "?";
     }
+}
+
+/* ===== DIM-screen block layout =============================================
+ * Fixed block set (indexed by dim_block_id_t), each a cell on the same grid as
+ * the home tiles. No reflow/insert/delete — just position/size/visibility per
+ * known block. Defaults reproduce the built-in dim arrangement. */
+
+dim_block_t g_dim_blocks[DB_COUNT];
+
+/* col,row,w,h,visible — indexed by dim_block_id_t (order must match the enum):
+ * THERMO (centre, under the clock), WEATHER (top-right), FORECAST (bottom strip),
+ * WASTE (top-left), FAMILY (right, under weather), VENT (left of centre). */
+static const dim_block_t DIM_DEFAULTS[DB_COUNT] = {
+    /* col,row,w,h,vis. Top zone (rows 0-2): waste left, weather right, clock
+     * centered (not gridded). Middle band (rows 4-5): vent | thermo | family.
+     * Bottom (rows 6-7): forecast strip. Non-overlapping so the editor + render
+     * agree. THERMO is wide (w7) so its metrics row fits. */
+    [DB_WASTE]    = { 0, 0, 3, 3, 1 },
+    [DB_WEATHER]  = { 9, 0, 3, 3, 1 },
+    [DB_VENT]     = { 0, 4, 2, 2, 1 },
+    [DB_THERMO]   = { 3, 4, 6, 2, 1 },   /* w6 centred on col6 = screen centre, so
+                                            the indoor temp lines up under the clock */
+    [DB_FAMILY]   = { 9, 4, 3, 2, 1 },
+    [DB_FORECAST] = { 0, 6, 9, 2, 1 },   /* narrowed to make room for energy/gas */
+    [DB_ENERGY]   = { 9, 6, 3, 1, 1 },   /* bottom-right, stacked over gas */
+    [DB_GAS]      = { 9, 7, 3, 1, 1 },
+};
+
+void dim_layout_reset_default(void) {
+    memcpy(g_dim_blocks, DIM_DEFAULTS, sizeof g_dim_blocks);
+}
+
+dim_block_t dim_block_default(int id) {
+    if (id < 0 || id >= DB_COUNT) { dim_block_t z = { 0, 0, 1, 1, 1 }; return z; }
+    return DIM_DEFAULTS[id];
+}
+
+static const char * dim_layout_file(char * buf, int bufsz) {
+    snprintf(buf, bufsz, "%s/toonui_dim_layout.cfg", layout_dir());
+    return buf;
+}
+
+void dim_layout_load(void) {
+    dim_layout_reset_default();                 /* seed; lines below override by id */
+    char path[256];
+    FILE * f = fopen(dim_layout_file(path, sizeof path), "r");
+    if (!f) return;
+    char line[128];
+    while (fgets(line, sizeof line, f)) {
+        if (strncmp(line, "dim=", 4) != 0) continue;
+        int id, c, r, w, h, v;
+        if (sscanf(line + 4, "%d,%d,%d,%d,%d,%d", &id, &c, &r, &w, &h, &v) == 6
+                && id >= 0 && id < DB_COUNT) {
+            /* Clamp to the grid so a hand-edited/garbled file can't place a block
+             * off-screen. */
+            if (w < 1) w = 1; if (w > LAYOUT_COLS) w = LAYOUT_COLS;
+            if (h < 1) h = 1; if (h > LAYOUT_ROWS) h = LAYOUT_ROWS;
+            if (c < 0) c = 0; if (c + w > LAYOUT_COLS) c = LAYOUT_COLS - w;
+            if (r < 0) r = 0; if (r + h > LAYOUT_ROWS) r = LAYOUT_ROWS - h;
+            g_dim_blocks[id] = (dim_block_t){ c, r, w, h, v ? 1 : 0 };
+        }
+    }
+    fclose(f);
+}
+
+void dim_layout_save(void) {
+    char path[256];
+    FILE * f = fopen(dim_layout_file(path, sizeof path), "w");
+    if (!f) return;
+    for (int id = 0; id < DB_COUNT; id++) {
+        const dim_block_t * b = &g_dim_blocks[id];
+        fprintf(f, "dim=%d,%d,%d,%d,%d,%d\n", id, b->col, b->row, b->w, b->h, b->visible);
+    }
+    fclose(f);
+}
+
+const char * dim_block_name(int id) {
+    switch (id) {
+        case DB_THERMO:   return "Thermostaat";
+        case DB_WEATHER:  return "Weer nu";
+        case DB_FORECAST: return "Weer strip";
+        case DB_WASTE:    return "Afval";
+        case DB_FAMILY:   return "Familie";
+        case DB_VENT:     return "Ventilatie";
+        case DB_ENERGY:   return "Stroom";
+        case DB_GAS:      return "Gas";
+    }
+    return "?";
 }

@@ -6,7 +6,9 @@
  * Tap a tile to navigate to its detail screen.
  */
 #include "screens.h"
+#include "i18n.h"
 #include "display.h"   /* SX()/SY() scaling for Toon 1 (800x480) vs Toon 2 (1024x600) */
+#include "video.h"
 #include "inbox.h"
 #include "boxtalk.h"
 #ifdef WASM_BUILD
@@ -47,6 +49,7 @@ static lv_obj_t * scr_root = NULL;
 
 /* Big thermostat tile widgets — updated by refresh timer */
 static lv_obj_t * lbl_t_clock;
+static lv_obj_t * lbl_t_clock_colon = NULL;   /* pulsing ":" overlay */
 static lv_obj_t * lbl_t_temp;
 static lv_obj_t * lbl_t_setpoint;
 static lv_obj_t * lbl_t_burner;
@@ -99,18 +102,21 @@ static lv_obj_t * lbl_outside_sub;
 static lv_obj_t * fc_day_lbl[WEATHER_FORECAST_DAYS];
 static lv_obj_t * fc_temp_lbl[WEATHER_FORECAST_DAYS];
 static lv_obj_t * fc_wind_lbl[WEATHER_FORECAST_DAYS];
+static lv_obj_t * fc_desc_lbl[WEATHER_FORECAST_DAYS];
+static lv_obj_t * fc_wind_arrow[WEATHER_FORECAST_DAYS];
 static lv_obj_t * fc_icon[WEATHER_FORECAST_DAYS];
+/* Set when the forecast tile is too short for the (un-zoomable) weather icons
+ * — e.g. a grid-placed "Weer" tile only 1 row tall on the 480-px Toon 1 panel.
+ * In that case the column renders compact/text-only (time + temp + wind, no
+ * icon) so nothing overlaps. set_forecast_icon() honours this to keep the
+ * icon hidden across refreshes. */
+static int fc_compact = 0;
 static lv_obj_t * envelope_btn;
 static lv_obj_t * envelope_badge;
 static lv_obj_t * envelope_badge_lbl;
-static lv_obj_t * water_spinner;
-static lv_obj_t * forecast_box;
-static lv_obj_t * lbl_outside_main;
-static lv_obj_t * lbl_outside_sub;
-static lv_obj_t * fc_day_lbl[WEATHER_FORECAST_DAYS];
-static lv_obj_t * fc_temp_lbl[WEATHER_FORECAST_DAYS];
-static lv_obj_t * fc_wind_lbl[WEATHER_FORECAST_DAYS];
-static lv_obj_t * fc_icon[WEATHER_FORECAST_DAYS];
+static lv_obj_t * lbl_forecast_city = NULL;
+static lv_obj_t * lbl_life360_a = NULL;
+static lv_obj_t * lbl_life360_b = NULL;
 /* Bicolor partly-cloudy overlay — yellow sun layered on top of the
  * white cloud for 'b'/'j' Buienradar codes. Hidden for all other codes;
  * set_forecast_icon() manages visibility + src + recolor. */
@@ -193,27 +199,6 @@ static const lv_font_t * font_for(int px) {
     return &lv_font_montserrat_12;
 }
 
-static lv_obj_t * water_spinner;
-static lv_obj_t * forecast_box;
-static lv_obj_t * lbl_forecast_city = NULL;
-static lv_obj_t * lbl_life360_a = NULL;
-static lv_obj_t * lbl_life360_b   = NULL;
-static lv_obj_t * lbl_outside_main;
-static lv_obj_t * lbl_outside_sub;
-static lv_obj_t * fc_day_lbl[WEATHER_FORECAST_DAYS];
-static lv_obj_t * fc_temp_lbl[WEATHER_FORECAST_DAYS];
-static lv_obj_t * fc_desc_lbl[WEATHER_FORECAST_DAYS];
-static lv_obj_t * fc_wind_arrow[WEATHER_FORECAST_DAYS];
-static lv_obj_t * lbl_inbox_main;
-static lv_obj_t * lbl_inbox_sub;
-/* Bottom-row labels (Energy/Weather/Waste) — updated by refresh_cb */
-static lv_obj_t * lbl_bot_energy;
-static lv_obj_t * lbl_bot_weather;
-static lv_obj_t * lbl_bot_waste;
-static lv_obj_t * tile_img_flame;
-static lv_obj_t * tile_img_faucet;
-static lv_obj_t * tile_img_drop;
-
 /* Whole-tile pointers so refresh_cb can flip their offline labels or
  * hide them entirely based on the matching enable_* flag +
  * settings.hide_offline_tiles. NULL until the screen is built. */
@@ -222,7 +207,6 @@ static lv_obj_t * tile_family   = NULL;
 static lv_obj_t * tile_vent     = NULL;
 static lv_obj_t * tile_energy   = NULL;
 static lv_obj_t * tile_waste    = NULL;
-static lv_obj_t * tile_curtains = NULL;
 /* Custom-layout-only info tiles (content labels; NULL unless created). */
 static lv_obj_t * tile_news_sum_lbl = NULL;
 static lv_obj_t * tile_cal_lbl      = NULL;
@@ -256,6 +240,7 @@ static lv_obj_t * update_banner     = NULL;
 static lv_obj_t * update_banner_lbl = NULL;
 static lv_obj_t * update_modal      = NULL;
 static lv_obj_t * about_status_lbl  = NULL;   /* live status line inside the modal */
+static int        update_modal_has_install = 0;  /* did the open modal build the install buttons? */
 static char       skipped_version[UPDATE_VERSION_MAX] = "";  /* banner suppressed for this ver */
 static int        update_minimized = 0;   /* dismissed → shown as an envelope icon */
 static int        install_pinned   = 0;   /* freeze the modal status line during install/result */
@@ -265,6 +250,7 @@ static lv_obj_t * update_env_btn   = NULL; /* minimized-update envelope (top-rig
  * @@STEP/@@FAIL markers the self-installer emits, so the user sees which step is
  * running / done / failed instead of a blind "installing…". */
 #define UPD_STEP_COUNT 6
+/* Translated at use-site in upd_row_set() via tr() — keep both languages here. */
 static const char * const UPD_STEPS[UPD_STEP_COUNT] = {
     "Nieuwste versie opzoeken",
     "Binary downloaden",
@@ -272,6 +258,14 @@ static const char * const UPD_STEPS[UPD_STEP_COUNT] = {
     "Helpers + assets",
     "Binary plaatsen",
     "UI herstarten",
+};
+static const char * const UPD_STEPS_EN[UPD_STEP_COUNT] = {
+    "Find latest version",
+    "Download binary",
+    "Verify download",
+    "Helpers + assets",
+    "Place binary",
+    "Restart UI",
 };
 static lv_obj_t  * upd_prog_modal = NULL;
 static lv_obj_t  * upd_prog_row[UPD_STEP_COUNT] = {0};
@@ -310,9 +304,11 @@ static float energy_gas_m3(void) {
 }
 static const char * energy_offline_label(void) {
     if (settings.energy_source == 1)        /* HomeWizard P1 */
-        return hw_state.polled_p1 ? "P1 offline" : "Initializing...";
+        return hw_state.polled_p1 ? tr("P1 offline", "P1 offline")
+                                  : tr("Initialiseren...", "Initializing...");
     /* meteradapter: last_flow_s == 0 means no notify has arrived yet */
-    return meter_state.last_flow_s ? "meter offline" : "Initializing...";
+    return meter_state.last_flow_s ? tr("meter offline", "meter offline")
+                                   : tr("Initialiseren...", "Initializing...");
 }
 
 /* ---------- tile builder helpers ---------- */
@@ -450,12 +446,14 @@ static void on_program_tap(lv_event_t * e) {
     lv_obj_clear_flag(modal, LV_OBJ_FLAG_SCROLLABLE);
 
     lv_obj_t * title = lv_label_create(modal);
-    lv_label_set_text(title, "Select program");
+    lv_label_set_text(title, tr("Programma kiezen", "Select program"));
     lv_obj_set_style_text_color(title, lv_color_hex(0xffffff), 0);
     lv_obj_set_style_text_font(title, SF(28), 0);
     lv_obj_align(title, LV_ALIGN_TOP_MID, 0, SY(50));
 
-    const char* names[]  = {"Comfort", "Home", "Sleep", "Away", "Manual"};
+    const char* names[]  = {tr("Comfort", "Comfort"), tr("Thuis", "Home"),
+                            tr("Slapen", "Sleep"), tr("Weg", "Away"),
+                            tr("Handmatig", "Manual")};
     int         values[] = {0, 1, 2, 3, -1};
     uint32_t    colors[] = {0xff8866, 0x66cc88, 0x4466cc, 0xaa66ff, 0xffaa44};
     for (int i = 0; i < 5; i++) {
@@ -481,7 +479,7 @@ static void on_program_tap(lv_event_t * e) {
     lv_obj_set_style_radius(cancel, 14, 0);
     lv_obj_add_event_cb(cancel, picker_close_cb, LV_EVENT_CLICKED, modal);
     lv_obj_t * cancel_lbl = lv_label_create(cancel);
-    lv_label_set_text(cancel_lbl, "Cancel");
+    lv_label_set_text(cancel_lbl, tr("Annuleren", "Cancel"));
     lv_obj_set_style_text_color(cancel_lbl, lv_color_hex(0xffffff), 0);
     lv_obj_set_style_text_font(cancel_lbl, SF(22), 0);
     lv_obj_center(cancel_lbl);
@@ -533,7 +531,7 @@ static void upd_prog_close(lv_event_t * e) {
 /* Paint step i's row: done (✓) / active (►) / pending (·) / failed (✗). */
 static void upd_row_set(int i, const char * mark, lv_color_t col) {
     if (!upd_prog_row[i]) return;
-    lv_label_set_text_fmt(upd_prog_row[i], "%s  %s", mark, UPD_STEPS[i]);
+    lv_label_set_text_fmt(upd_prog_row[i], "%s  %s", mark, tr(UPD_STEPS[i], UPD_STEPS_EN[i]));
     lv_obj_set_style_text_color(upd_prog_row[i], col, 0);
 }
 
@@ -551,7 +549,7 @@ static void upd_prog_tick(lv_timer_t * t) {
         if (sscanf(line, "@@STEP %d/", &n) == 1) { if (n > cur) cur = n; }
         else if (strncmp(line, "@@FAIL ", 7) == 0) {
             failed = cur > 0 ? cur : 1;
-            snprintf(failmsg, sizeof failmsg, "%s", line + 7);
+            snprintf(failmsg, sizeof failmsg, "%.*s", (int)sizeof(failmsg) - 1, line + 7);
             size_t L = strlen(failmsg);
             while (L && (failmsg[L-1] == '\n' || failmsg[L-1] == '\r')) failmsg[--L] = 0;
         }
@@ -566,12 +564,17 @@ static void upd_prog_tick(lv_timer_t * t) {
     }
     if (upd_prog_msg) {
         if (failed > 0)
-            lv_label_set_text_fmt(upd_prog_msg, "#ff7777 Mislukt bij stap %d:# %s",
-                                  failed, failmsg[0] ? failmsg : "(zie log)");
+            lv_label_set_text_fmt(upd_prog_msg,
+                                  tr("#ff7777 Mislukt bij stap %d:# %s",
+                                     "#ff7777 Failed at step %d:# %s"),
+                                  failed, failmsg[0] ? failmsg : tr("(zie log)", "(see log)"));
         else if (cur >= UPD_STEP_COUNT)
-            lv_label_set_text(upd_prog_msg, "Herstarten... het scherm komt zo terug.");
+            lv_label_set_text(upd_prog_msg,
+                              tr("Herstarten... het scherm komt zo terug.",
+                                 "Restarting... the screen will return shortly."));
         else
-            lv_label_set_text(upd_prog_msg, "Bezig met installeren...");
+            lv_label_set_text(upd_prog_msg,
+                              tr("Bezig met installeren...", "Installing..."));
     }
 }
 
@@ -585,11 +588,14 @@ static void do_install_now(lv_event_t * e) {
     if (update_already_installed()) {
         if (about_status_lbl)
             lv_label_set_text_fmt(about_status_lbl,
-                "Already on %s - nothing to install.", BUILD_VERSION);
+                tr("Al op %s - niets te installeren.",
+                   "Already on %s - nothing to install."), BUILD_VERSION);
         return;
     }
     if (about_status_lbl)
-        lv_label_set_text(about_status_lbl, "Installing... the screen will restart shortly.");
+        lv_label_set_text(about_status_lbl,
+                          tr("Installeren... het scherm herstart zo.",
+                             "Installing... the screen will restart shortly."));
 
     if (!upd_prog_modal) {
         upd_prog_modal = lv_obj_create(lv_scr_act());
@@ -610,7 +616,7 @@ static void do_install_now(lv_event_t * e) {
         lv_obj_t * h = lv_label_create(card);
         lv_obj_set_style_text_font(h, SF(28), 0);
         lv_obj_set_style_text_color(h, lv_color_hex(0xffffff), 0);
-        lv_label_set_text(h, "Update installeren");
+        lv_label_set_text(h, tr("Update installeren", "Installing update"));
         lv_obj_align(h, LV_ALIGN_TOP_LEFT, SX(24), SY(18));
 
         for (int i = 0; i < UPD_STEP_COUNT; i++) {
@@ -627,13 +633,13 @@ static void do_install_now(lv_event_t * e) {
         lv_label_set_long_mode(upd_prog_msg, LV_LABEL_LONG_WRAP);
         lv_obj_set_width(upd_prog_msg, SX(560));
         lv_obj_align(upd_prog_msg, LV_ALIGN_TOP_LEFT, SX(28), SY(70 + UPD_STEP_COUNT * 38 + 6));
-        lv_label_set_text(upd_prog_msg, "Bezig met installeren...");
+        lv_label_set_text(upd_prog_msg, tr("Bezig met installeren...", "Installing..."));
 
         lv_obj_t * x = lv_btn_create(card);
         lv_obj_set_size(x, SX(130), SY(46));
         lv_obj_align(x, LV_ALIGN_BOTTOM_RIGHT, SX(-16), SY(-12));
         lv_obj_add_event_cb(x, upd_prog_close, LV_EVENT_CLICKED, NULL);
-        lv_obj_t * xl = lv_label_create(x); lv_label_set_text(xl, "Sluiten"); lv_obj_center(xl);
+        lv_obj_t * xl = lv_label_create(x); lv_label_set_text(xl, tr("Sluiten", "Close")); lv_obj_center(xl);
     }
 
     /* Truncate the log so the modal starts from this run's markers, then fire
@@ -670,7 +676,8 @@ static void on_auto_update_toggle(lv_event_t * e) {
 static void * check_thread(void * arg) { (void)arg; update_check_now(); return NULL; }
 static void do_check_updates(lv_event_t * e) {
     (void)e;
-    if (about_status_lbl) lv_label_set_text(about_status_lbl, "Checking for updates...");
+    if (about_status_lbl) lv_label_set_text(about_status_lbl,
+        tr("Updates zoeken...", "Checking for updates..."));
     pthread_t t;
     if (pthread_create(&t, NULL, check_thread, NULL) == 0) pthread_detach(t);
 }
@@ -683,8 +690,10 @@ static void on_channel_toggle(lv_event_t * e) {
     settings_save();
     if (about_status_lbl)
         lv_label_set_text(about_status_lbl,
-            settings.update_channel ? "Channel: beta/dev - checking..."
-                                    : "Channel: stable - checking...");
+            settings.update_channel ? tr("Kanaal: beta/dev - zoeken...",
+                                         "Channel: beta/dev - checking...")
+                                    : tr("Kanaal: stabiel - zoeken...",
+                                         "Channel: stable - checking..."));
     pthread_t t;
     if (pthread_create(&t, NULL, check_thread, NULL) == 0) pthread_detach(t);
 }
@@ -738,14 +747,15 @@ static void open_about_modal(lv_event_t * e) {
     lv_obj_t * ver = lv_label_create(panel);
     lv_obj_set_style_text_font(ver, SF(18), 0);
     lv_obj_set_style_text_color(ver, lv_color_hex(0x88aabb), 0);
-    lv_label_set_text_fmt(ver, "%s  -  beta", BUILD_VERSION);
+    lv_label_set_text_fmt(ver, tr("%s  -  beta", "%s  -  beta"), BUILD_VERSION);
     lv_obj_align(ver, LV_ALIGN_TOP_LEFT, 60, 34);
 
     /* Credit + license line — alternative UI authorship and the MIT label. */
     lv_obj_t * cred = lv_label_create(panel);
     lv_obj_set_style_text_font(cred, SF(14), 0);
     lv_obj_set_style_text_color(cred, lv_color_hex(0x6f8aa0), 0);
-    lv_label_set_text(cred, "alternative UI by Ierlandfan  -  MIT License");
+    lv_label_set_text(cred, tr("alternatieve UI door Ierlandfan  -  MIT-licentie",
+                               "alternative UI by Ierlandfan  -  MIT License"));
     lv_obj_align(cred, LV_ALIGN_TOP_RIGHT, 0, 6);
 
     /* Live status line (updated by refresh_cb while open). */
@@ -771,7 +781,12 @@ static void open_about_modal(lv_event_t * e) {
     lv_obj_set_style_text_color(notes, lv_color_hex(0xc8d4e0), 0);
     lv_label_set_long_mode(notes, LV_LABEL_LONG_WRAP);
     lv_obj_set_width(notes, SX(690));
-    lv_label_set_text(notes, g_update_state.release_notes[0]
+    /* Prefer the multi-release changelog (newest first) so testers see version
+     * history, not just the latest release's notes. Falls back to the single
+     * release notes, then the static about text. */
+    lv_label_set_text(notes, g_update_state.changelog[0]
+        ? g_update_state.changelog
+        : g_update_state.release_notes[0]
         ? g_update_state.release_notes
         : "freetoon - an independent LVGL UI for the Eneco Toon, by Ierlandfan.\n"
           "Released under the MIT License.\n\n"
@@ -793,7 +808,8 @@ static void open_about_modal(lv_event_t * e) {
     lv_obj_t * au_lbl = lv_label_create(panel);
     lv_obj_set_style_text_font(au_lbl, SF(18), 0);
     lv_obj_set_style_text_color(au_lbl, lv_color_hex(0xc8d4e0), 0);
-    lv_label_set_text_fmt(au_lbl, "Auto-update nightly (~%02d:00)", settings.auto_update_hour);
+    lv_label_set_text_fmt(au_lbl, tr("Auto-update 's nachts (~%02d:00)",
+                                     "Auto-update nightly (~%02d:00)"), settings.auto_update_hour);
     lv_obj_align(au_lbl, LV_ALIGN_TOP_LEFT, 0, SY(350));
     lv_obj_t * au_sw = lv_switch_create(panel);
     lv_obj_align(au_sw, LV_ALIGN_TOP_LEFT, SX(320), SY(344));
@@ -804,7 +820,7 @@ static void open_about_modal(lv_event_t * e) {
     lv_obj_t * ch_lbl = lv_label_create(panel);
     lv_obj_set_style_text_font(ch_lbl, SF(18), 0);
     lv_obj_set_style_text_color(ch_lbl, lv_color_hex(0xc8d4e0), 0);
-    lv_label_set_text(ch_lbl, "Beta / dev");
+    lv_label_set_text(ch_lbl, tr("Beta / dev", "Beta / dev"));
     lv_obj_align(ch_lbl, LV_ALIGN_TOP_LEFT, SX(430), SY(350));
     lv_obj_t * ch_sw = lv_switch_create(panel);
     lv_obj_align(ch_sw, LV_ALIGN_TOP_LEFT, SX(600), SY(344));
@@ -819,8 +835,9 @@ static void open_about_modal(lv_event_t * e) {
     lv_obj_add_event_cb(b_check, do_check_updates, LV_EVENT_CLICKED, NULL);
     lv_obj_t * cl = lv_label_create(b_check);
     lv_obj_set_style_text_font(cl, SF(18), 0);
-    lv_label_set_text(cl, "Check"); lv_obj_center(cl);
+    lv_label_set_text(cl, tr("Controleer", "Check")); lv_obj_center(cl);
 
+    update_modal_has_install = g_update_state.available ? 1 : 0;
     if (g_update_state.available) {
         lv_obj_t * b_inst = lv_btn_create(panel);
         lv_obj_set_size(b_inst, SX(150), SY(56));
@@ -829,7 +846,7 @@ static void open_about_modal(lv_event_t * e) {
         lv_obj_add_event_cb(b_inst, do_install_now, LV_EVENT_CLICKED, NULL);
         lv_obj_t * il = lv_label_create(b_inst);
         lv_obj_set_style_text_font(il, SF(18), 0);
-        lv_label_set_text(il, "Install now"); lv_obj_center(il);
+        lv_label_set_text(il, tr("Nu installeren", "Install now")); lv_obj_center(il);
 
         lv_obj_t * b_skip = lv_btn_create(panel);
         lv_obj_set_size(b_skip, SX(96), SY(56));
@@ -838,7 +855,7 @@ static void open_about_modal(lv_event_t * e) {
         lv_obj_add_event_cb(b_skip, do_skip_version, LV_EVENT_CLICKED, NULL);
         lv_obj_t * sl = lv_label_create(b_skip);
         lv_obj_set_style_text_font(sl, SF(18), 0);
-        lv_label_set_text(sl, "Skip"); lv_obj_center(sl);
+        lv_label_set_text(sl, tr("Overslaan", "Skip")); lv_obj_center(sl);
 
         lv_obj_t * b_dis = lv_btn_create(panel);
         lv_obj_set_size(b_dis, SX(130), SY(56));
@@ -847,7 +864,7 @@ static void open_about_modal(lv_event_t * e) {
         lv_obj_add_event_cb(b_dis, do_dismiss_to_envelope, LV_EVENT_CLICKED, NULL);
         lv_obj_t * dl = lv_label_create(b_dis);
         lv_obj_set_style_text_font(dl, SF(18), 0);
-        lv_label_set_text(dl, LV_SYMBOL_ENVELOPE " Dismiss"); lv_obj_center(dl);
+        lv_label_set_text(dl, tr(LV_SYMBOL_ENVELOPE " Verbergen", LV_SYMBOL_ENVELOPE " Dismiss")); lv_obj_center(dl);
     }
 
     lv_obj_t * x = lv_btn_create(panel);
@@ -857,7 +874,7 @@ static void open_about_modal(lv_event_t * e) {
     lv_obj_add_event_cb(x, on_update_modal_close, LV_EVENT_CLICKED, NULL);
     lv_obj_t * xl = lv_label_create(x);
     lv_obj_set_style_text_font(xl, SF(22), 0);
-    lv_label_set_text(xl, "Close"); lv_obj_center(xl);
+    lv_label_set_text(xl, tr("Sluiten", "Close")); lv_obj_center(xl);
 }
 /* Keep the old name as an alias for the banner's click handler. */
 static void on_update_banner_click(lv_event_t * e) { open_about_modal(e); }
@@ -895,19 +912,112 @@ static void on_vent_mode(lv_event_t * e) {
  * onto a 2-position toggle anyway. The buttons reuse on_vent_mode with
  * cmd="low" / "high". */
 
-/* --- Curtains tile (talks to HA via REST in homeassistant.c) ---
- * lbl_curtain_state is updated from refresh_cb; the 3 button handlers
- * fire off async open/close/stop calls.
- *
- * curt_spinner is an lv_spinner that's only visible while ha_state.
- * curtain_state ∈ {"opening","closing"}. curt_bar is a position bar
- * (0..100) so the user can see at a glance how open the curtain is. */
-static lv_obj_t * lbl_curtain_state = NULL;
-static lv_obj_t * curt_spinner      = NULL;
-static lv_obj_t * curt_bar          = NULL;
-static void on_curt_open (lv_event_t * e) { (void)e; if (settings.client_mode) client_link_curtain("open");  else ha_curtain_open_async();  }
-static void on_curt_close(lv_event_t * e) { (void)e; if (settings.client_mode) client_link_curtain("close"); else ha_curtain_close_async(); }
-static void on_curt_stop (lv_event_t * e) { (void)e; if (settings.client_mode) client_link_curtain("stop");  else ha_curtain_stop_async();  }
+/* --- Pinned device quick-tiles (home bottom-left) ---------------------------
+ * Any device flagged pin_home in the device manager appears as a compact
+ * strip here: covers get Open/Stop/Close + a position slider, lights an
+ * On/Off toggle + brightness slider, switches an On/Off toggle, scripts/
+ * scenes a Run button. State is refreshed from ha_devices[] in refresh_cb.
+ * Replaces the old fixed curtain + blinds tiles (covers are now just pinned
+ * cover devices, configurable in Settings -> Devices). */
+#define HOME_PIN_MAX 3
+typedef struct {
+    int        dev_idx;     /* index into ha_devices[] */
+    lv_obj_t * tile;
+    lv_obj_t * lbl;         /* "<name>  <state>" */
+    lv_obj_t * slider;      /* cover position / light brightness, or NULL */
+    lv_obj_t * btn;         /* light/switch toggle or script Run, or NULL */
+    lv_obj_t * btn_lbl;
+} home_pin_t;
+static home_pin_t home_pins[HOME_PIN_MAX];
+static int        home_pin_count = 0;
+
+static int pin_ev_idx(lv_event_t * e) { return (int)(intptr_t)lv_event_get_user_data(e); }
+static void on_pin_open (lv_event_t * e) { int i = pin_ev_idx(e); if (i>=0 && i<ha_device_count) ha_device_cover_async(ha_devices[i].entity_id, "open");  }
+static void on_pin_stop (lv_event_t * e) { int i = pin_ev_idx(e); if (i>=0 && i<ha_device_count) ha_device_cover_async(ha_devices[i].entity_id, "stop");  }
+static void on_pin_close(lv_event_t * e) { int i = pin_ev_idx(e); if (i>=0 && i<ha_device_count) ha_device_cover_async(ha_devices[i].entity_id, "close"); }
+static void on_pin_toggle(lv_event_t * e) { int i = pin_ev_idx(e); if (i>=0 && i<ha_device_count) ha_device_toggle_async(ha_devices[i].type, ha_devices[i].entity_id); }
+static void on_pin_run(lv_event_t * e) { int i = pin_ev_idx(e); if (i>=0 && i<ha_device_count) ha_device_run_async(ha_devices[i].type, ha_devices[i].entity_id); }
+static void on_pin_pos(lv_event_t * e) {
+    int i = pin_ev_idx(e);
+    if (i < 0 || i >= ha_device_count) return;
+    int v = lv_slider_get_value(lv_event_get_target(e));
+    if (ha_devices[i].type == HADEV_LIGHT) ha_light_set_brightness_async(ha_devices[i].entity_id, v);
+    else                                   ha_cover_set_position_async(ha_devices[i].entity_id, v);
+}
+
+/* Build one pinned tile at row `slot` (0-based) for ha_devices[dev_idx]. */
+static void build_pin_tile(lv_obj_t * parent, int dev_idx, int slot) {
+    if (home_pin_count >= HOME_PIN_MAX) return;
+    ha_device_t * D = &ha_devices[dev_idx];
+    home_pin_t * P = &home_pins[home_pin_count];
+    memset(P, 0, sizeof *P);
+    P->dev_idx = dev_idx;
+
+    lv_obj_t * t = lv_obj_create(parent);
+    P->tile = t;
+    lv_obj_set_size(t, 520, 44);
+    lv_obj_set_pos(t, 20, 386 + slot * 48);
+    lv_obj_set_style_bg_color(t, lv_color_hex(COL_TILE_BG), 0);
+    lv_obj_set_style_border_width(t, 0, 0);
+    lv_obj_set_style_radius(t, 12, 0);
+    lv_obj_set_style_pad_all(t, 6, 0);
+    lv_obj_clear_flag(t, LV_OBJ_FLAG_SCROLLABLE);
+
+    P->lbl = lv_label_create(t);
+    lv_obj_set_style_text_color(P->lbl, lv_color_hex(COL_TEXT_HI), 0);
+    lv_obj_set_style_text_font(P->lbl, SF(14), 0);
+    lv_label_set_text(P->lbl, D->name);
+    lv_obj_align(P->lbl, LV_ALIGN_TOP_LEFT, 8, 2);
+
+    if (D->type == HADEV_COVER || D->type == HADEV_LIGHT) {
+        P->slider = lv_slider_create(t);
+        lv_obj_set_size(P->slider, 240, 6);
+        lv_obj_align(P->slider, LV_ALIGN_BOTTOM_LEFT, 8, -4);
+        lv_slider_set_range(P->slider, 0, 100);
+        lv_slider_set_value(P->slider, 0, LV_ANIM_OFF);
+        lv_obj_set_style_bg_color(P->slider, lv_color_hex(0x223344), LV_PART_MAIN);
+        lv_obj_set_style_bg_color(P->slider,
+            lv_color_hex(D->type == HADEV_LIGHT ? 0xffcc44 : 0x44aaff), LV_PART_INDICATOR);
+        lv_obj_remove_style(P->slider, NULL, LV_PART_KNOB);
+        lv_obj_add_event_cb(P->slider, on_pin_pos, LV_EVENT_RELEASED, (void *)(intptr_t)dev_idx);
+    }
+
+    if (D->type == HADEV_COVER) {
+        struct { const char * txt; uint32_t col; lv_event_cb_t cb; int x; } cb[] = {
+            { tr("Open", "Open"),    0x2e6e3a, on_pin_open, -156 },
+            { tr("Stop", "Stop"),    0x6a5424, on_pin_stop,  -82 },
+            { tr("Dicht", "Close"),  0x6e3a3a, on_pin_close,  -8 },
+        };
+        for (size_t i = 0; i < 3; i++) {
+            lv_obj_t * b = lv_btn_create(t);
+            lv_obj_set_size(b, 70, 32);
+            lv_obj_align(b, LV_ALIGN_RIGHT_MID, cb[i].x, 0);
+            lv_obj_set_style_bg_color(b, lv_color_hex(cb[i].col), 0);
+            lv_obj_set_style_radius(b, 8, 0);
+            lv_obj_add_event_cb(b, cb[i].cb, LV_EVENT_CLICKED, (void *)(intptr_t)dev_idx);
+            lv_obj_t * l = lv_label_create(b);
+            lv_obj_set_style_text_color(l, lv_color_hex(0xffffff), 0);
+            lv_obj_set_style_text_font(l, SF(14), 0);
+            lv_label_set_text(l, cb[i].txt);
+            lv_obj_center(l);
+        }
+    } else {
+        int run = (D->type == HADEV_SCRIPT || D->type == HADEV_SCENE);
+        P->btn = lv_btn_create(t);
+        lv_obj_set_size(P->btn, run ? 90 : 70, 32);
+        lv_obj_align(P->btn, LV_ALIGN_RIGHT_MID, -8, 0);
+        lv_obj_set_style_bg_color(P->btn, lv_color_hex(run ? 0x2e5e8a : 0x3a4658), 0);
+        lv_obj_set_style_radius(P->btn, 8, 0);
+        lv_obj_add_event_cb(P->btn, run ? on_pin_run : on_pin_toggle, LV_EVENT_CLICKED,
+                            (void *)(intptr_t)dev_idx);
+        P->btn_lbl = lv_label_create(P->btn);
+        lv_obj_set_style_text_color(P->btn_lbl, lv_color_hex(0xffffff), 0);
+        lv_obj_set_style_text_font(P->btn_lbl, SF(14), 0);
+        lv_label_set_text(P->btn_lbl, run ? (D->type == HADEV_SCENE ? tr("Activeer", "Activate") : tr("Start", "Run")) : tr("Uit", "Off"));
+        lv_obj_center(P->btn_lbl);
+    }
+    home_pin_count++;
+}
 
 /* Timer button cycles 10 → 20 → 30 → off and updates its own label.
  * "off" maps to vremotecmd=auto (the most natural resting state). */
@@ -927,7 +1037,7 @@ static void on_vent_timer(lv_event_t * e) {
         case 1:  cmd = "timer1"; label = "10m"; break;
         case 2:  cmd = "timer2"; label = "20m"; break;
         case 3:  cmd = "timer3"; label = "30m"; break;
-        default: cmd = "auto";   label = "Timer"; vent_timer_step = 0; break;
+        default: cmd = "auto";   label = tr("Timer", "Timer"); vent_timer_step = 0; break;
     }
     if (vent_timer_lbl) lv_label_set_text(vent_timer_lbl, label);
     vent_local_press_ms = lv_tick_get();
@@ -953,14 +1063,17 @@ static void vent_apply_fan_anim(int rpm) {
         lv_anim_del(vent_fan_img, NULL);
         return;
     }
-    /* Linear rpm → ms/turn: faster fan = shorter period. Clamped to a
-       visually-perceptible range. Empirical anchors on this Itho:
-         ~700 rpm (FanInfo=high)  → ~2.8 s/turn — slow but visible
-         ~2500 rpm (FanInfo=low)  → ~1.0 s/turn — clearly faster
-         3500+ rpm (boost)        →  ~0.2 s/turn — blur */
-    int period = 3500 - rpm;
-    if (period < 200)  period = 200;
-    if (period > 3500) period = 3500;
+    /* Linear rpm → ms/turn mapped onto this CVE's REAL rpm band so the spin
+       visibly tracks Low→High. After the 2026-06-15 remote fix the band is
+       ~1150 rpm (low/idle) → ~2700 rpm (high) → ~2900 (boost). The old
+       3500-rpm curve only reached ~800 ms at high (not obviously fast); this
+       steeper curve (~1.3 ms/rpm) gives:
+         ~1150 rpm → ~2.4 s/turn — slow
+         ~1800 rpm → ~1.6 s/turn — medium
+         ~2700 rpm → ~0.4 s/turn — fast blur */
+    int period = 2600 - (rpm - 1000) * 13 / 10;
+    if (period < 280)  period = 280;
+    if (period > 2600) period = 2600;
     /* Hysteresis: rpm jitters ±1 every 8 s poll. Without this every poll
        would lv_anim_del + restart the spin, snapping the icon back to 0°
        (visible glitch — that's what "spinner acting weird" actually was). */
@@ -1040,7 +1153,7 @@ static void apply_offline_tile_visibility(void) {
         { tile_water,    water_live,  LT_WATER  },
         { tile_vent,     vent_live,   LT_VENT   },
         { tile_family,   family_live, LT_FAMILY },
-        { tile_curtains, family_live, LT_NONE   },   /* curtains share the HA gate */
+        /* Pinned device tiles show their own "(HA offline)" text in refresh_cb. */
     };
     for (size_t i = 0; i < sizeof(v)/sizeof(v[0]); i++) {
         if (!v[i].tile) continue;
@@ -1057,6 +1170,63 @@ static void apply_offline_tile_visibility(void) {
         if (hide && !v[i].live) lv_obj_add_flag(v[i].tile, LV_OBJ_FLAG_HIDDEN);
         else                    lv_obj_clear_flag(v[i].tile, LV_OBJ_FLAG_HIDDEN);
     }
+}
+
+static int render_tile_slot(int slot, lv_obj_t * lbl_main, lv_obj_t * lbl_sub);  /* fwd */
+
+/* Agenda overlay for the 4 swappable right-column tiles (ENERGY/FAMILY/VENT/
+ * WATER). An opaque label that covers the tile body and lists upcoming events
+ * when that slot is bound to "local:agenda" — shown/hidden in refresh_cb. */
+static lv_obj_t * slot_agenda[4] = {0};
+
+static lv_obj_t * make_slot_agenda(lv_obj_t * tile, uint32_t bg) {
+    if (!tile) return NULL;
+    lv_obj_t * l = lv_label_create(tile);
+    lv_obj_set_style_bg_color(l, lv_color_hex(bg), 0);
+    lv_obj_set_style_bg_opa(l, LV_OPA_COVER, 0);
+    lv_obj_set_style_radius(l, 10, 0);
+    lv_obj_set_style_pad_all(l, SX(8), 0);
+    lv_obj_set_style_text_color(l, lv_color_hex(COL_TEXT_HI), 0);
+    lv_obj_set_style_text_font(l, SF(15), 0);
+    lv_label_set_long_mode(l, LV_LABEL_LONG_WRAP);
+    lv_obj_set_size(l, LV_PCT(100), LV_PCT(100));
+    lv_obj_align(l, LV_ALIGN_TOP_LEFT, 0, 0);
+    lv_obj_add_flag(l, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_move_foreground(l);                 /* cover the tile's own widgets */
+    return l;
+}
+
+/* Fill an agenda overlay with a heading + the next few events. */
+static void fill_agenda_overlay(lv_obj_t * l) {
+    if (!l) return;
+    char buf[420] = "";
+    int nn = calendar_state.count; if (nn > 4) nn = 4;
+    for (int i = 0; i < nn; i++) {
+        calendar_event_t * ev = &calendar_state.ev[i];
+        char line[120];
+        snprintf(line, sizeof line, "%s %s %s\n",
+                 ev->date + 5, ev->time[0] ? ev->time : "", ev->summary);   /* MM-DD */
+        strncat(buf, line, sizeof buf - strlen(buf) - 1);
+    }
+    char out[480];
+    snprintf(out, sizeof out, "%s\n%s", tr("Agenda", "Calendar"),
+             buf[0] ? buf : (settings.calendar_enabled ? tr("Geen afspraken", "No events")
+                                                       : tr("Agenda uit", "Calendar off")));
+    lv_label_set_text(l, out);
+}
+
+/* Either render the agenda overlay (when the slot is bound to "local:agenda")
+ * or hide it and fall back to the normal integration/built-in render. Returns 1
+ * when the slot is "active" (built-in refresh should be skipped). */
+static int slot_render_or_agenda(int slot, int ai, lv_obj_t * lbl_main, lv_obj_t * lbl_sub) {
+    const char * b = tile_slots_binding(slot);
+    if (b && !strcmp(b, "local:agenda")) {
+        fill_agenda_overlay(slot_agenda[ai]);
+        if (slot_agenda[ai]) { lv_obj_clear_flag(slot_agenda[ai], LV_OBJ_FLAG_HIDDEN); lv_obj_move_foreground(slot_agenda[ai]); }
+        return 1;
+    }
+    if (slot_agenda[ai]) lv_obj_add_flag(slot_agenda[ai], LV_OBJ_FLAG_HIDDEN);
+    return render_tile_slot(slot, lbl_main, lbl_sub);
 }
 
 /* Render an integration's latest_value/subtitle into the given pair of
@@ -1114,25 +1284,25 @@ static void render_local_into(const char * id, lv_obj_t * title,
                               lv_obj_t * main, lv_obj_t * sub) {
     if (sub) lv_label_set_text(sub, "");
     if (!strcmp(id, "local:energy")) {
-        if (title) lv_label_set_text(title, "Energie");
+        if (title) lv_label_set_text(title, tr("Energie", "Energy"));
         if (main)  lv_label_set_text_fmt(main, "%.0f W", energy_power_w());
     } else if (!strcmp(id, "local:water")) {
-        if (title) lv_label_set_text(title, "Water");
+        if (title) lv_label_set_text(title, tr("Water", "Water"));
         if (hw_state.connected_water) {
             if (main) lv_label_set_text_fmt(main, "%.1f L/min", hw_state.water_lpm);
             if (sub)  lv_label_set_text_fmt(sub, "%.2f m3", hw_state.water_total_m3);
-        } else if (main) lv_label_set_text(main, "offline");
+        } else if (main) lv_label_set_text(main, tr("offline", "offline"));
     } else if (!strcmp(id, "local:vent")) {
-        if (title) lv_label_set_text(title, "Ventilatie");
+        if (title) lv_label_set_text(title, tr("Ventilatie", "Ventilation"));
         if (vent_state.connected) {
             if (main) lv_label_set_text_fmt(main, "%d%%", vent_state.exh_fan_pct);
-        } else if (main) lv_label_set_text(main, "offline");
+        } else if (main) lv_label_set_text(main, tr("offline", "offline"));
     } else if (!strcmp(id, "local:family")) {
-        if (title) lv_label_set_text(title, "Familie");
+        if (title) lv_label_set_text(title, tr("Familie", "Family"));
         if (main)  lv_label_set_text(main, ha_state.loc_a[0] ? (const char *)ha_state.loc_a : "-");
         if (sub)   lv_label_set_text(sub,  (const char *)ha_state.loc_b);
     } else if (!strcmp(id, "local:air")) {
-        if (title) lv_label_set_text(title, "Lucht");
+        if (title) lv_label_set_text(title, tr("Lucht", "Air"));
         if (main)  lv_label_set_text_fmt(main, "%d ppm", toon_state.eco2);
         if (sub)   lv_label_set_text(sub, air_quality_label(toon_state.eco2, toon_state.tvoc));
     }
@@ -1184,7 +1354,7 @@ static void refresh_cb(lv_timer_t * t) {
             strncat(buf, ti, sizeof buf - strlen(buf) - 1);
             strncat(buf, "\n", sizeof buf - strlen(buf) - 1);
         }
-        lv_label_set_text(tile_news_sum_lbl, buf[0] ? buf : "Geen nieuws");
+        lv_label_set_text(tile_news_sum_lbl, buf[0] ? buf : tr("Geen nieuws", "No news"));
     }
     if (tile_cal_lbl) {
         char buf[512] = ""; int nn = calendar_state.count; if (nn > 5) nn = 5;
@@ -1196,7 +1366,8 @@ static void refresh_cb(lv_timer_t * t) {
             strncat(buf, line, sizeof buf - strlen(buf) - 1);
         }
         lv_label_set_text(tile_cal_lbl, buf[0] ? buf :
-            (settings.calendar_enabled ? "Geen afspraken" : "Agenda uit"));
+            (settings.calendar_enabled ? tr("Geen afspraken", "No events")
+                                       : tr("Agenda uit", "Calendar off")));
     }
 
     /* Marketplace tile overrides — if a slot is bound, render the
@@ -1205,13 +1376,13 @@ static void refresh_cb(lv_timer_t * t) {
      * buttons/fan stay visible (no separate hide pass) — accepted UX
      * trade-off for keeping refresh logic local. */
     int slot_active[TILE_SLOT_COUNT] = {0};
-    slot_active[TILE_SLOT_ENERGY] = render_tile_slot(TILE_SLOT_ENERGY,
+    slot_active[TILE_SLOT_ENERGY] = slot_render_or_agenda(TILE_SLOT_ENERGY, 0,
                                                     lbl_energy_w, lbl_energy_gas);
-    slot_active[TILE_SLOT_FAMILY] = render_tile_slot(TILE_SLOT_FAMILY,
+    slot_active[TILE_SLOT_FAMILY] = slot_render_or_agenda(TILE_SLOT_FAMILY, 1,
                                                     lbl_life360_a, lbl_life360_b);
-    slot_active[TILE_SLOT_VENT]   = render_tile_slot(TILE_SLOT_VENT,
+    slot_active[TILE_SLOT_VENT]   = slot_render_or_agenda(TILE_SLOT_VENT, 2,
                                                     lbl_boiler_state, lbl_boiler_pressure);
-    slot_active[TILE_SLOT_WATER]  = render_tile_slot(TILE_SLOT_WATER,
+    slot_active[TILE_SLOT_WATER]  = slot_render_or_agenda(TILE_SLOT_WATER, 3,
                                                     lbl_inbox_main, lbl_inbox_sub);
 
     /* Page-1 (swipe) slots — render the bound integration, or a placeholder. */
@@ -1223,7 +1394,7 @@ static void refresh_cb(lv_timer_t * t) {
             render_tile_slot(TILE_SLOT_P1_0 + i, p1_main[i], p1_sub[i]);
         } else {
             if (p1_title[i]) lv_label_set_text(p1_title[i], "");
-            if (p1_main[i])  lv_label_set_text(p1_main[i], LV_SYMBOL_PLUS "  Tap to assign");
+            if (p1_main[i])  lv_label_set_text(p1_main[i], tr(LV_SYMBOL_PLUS "  Tik om te koppelen", LV_SYMBOL_PLUS "  Tap to assign"));
             if (p1_sub[i])   lv_label_set_text(p1_sub[i], "");
         }
     }
@@ -1286,7 +1457,9 @@ static void refresh_cb(lv_timer_t * t) {
         if (!relevant) update_minimized = 0;   /* reset once it's gone */
         /* Banner when relevant + not minimized; envelope when minimized. */
         if (relevant && !update_minimized) {
-            lv_label_set_text_fmt(update_banner_lbl, "%s available  -  tap for details",
+            lv_label_set_text_fmt(update_banner_lbl,
+                                  tr("%s beschikbaar  -  tik voor details",
+                                     "%s available  -  tap for details"),
                                   g_update_state.latest_version);
             lv_obj_clear_flag(update_banner, LV_OBJ_FLAG_HIDDEN);
         } else {
@@ -1320,14 +1493,22 @@ static void refresh_cb(lv_timer_t * t) {
      * an install/result message is pinned. */
     if (about_status_lbl && !install_pinned) {
         if (g_update_state.available)
-            lv_label_set_text_fmt(about_status_lbl, "Update %s available",
+            lv_label_set_text_fmt(about_status_lbl,
+                                  tr("Update %s beschikbaar", "Update %s available"),
                                   g_update_state.latest_version);
         else if (g_update_state.last_check_epoch)
             lv_label_set_text(about_status_lbl, g_update_state.last_check_ok
-                              ? "You're on the latest release." : "Update check failed - check internet.");
+                              ? tr("Je hebt de nieuwste versie.", "You're on the latest release.")
+                              : tr("Updatecontrole mislukt - check internet.", "Update check failed - check internet."));
         else
-            lv_label_set_text(about_status_lbl, "Tap \"Check for updates\".");
+            lv_label_set_text(about_status_lbl, tr("Tik \"Controleer updates\".", "Tap \"Check for updates\"."));
     }
+
+    /* If the About/Update modal is open and the (async) check just found an
+     * update, rebuild it so Install/Skip/Dismiss show right away — no need to
+     * tap the banner to reopen it. */
+    if (update_modal && g_update_state.available && !update_modal_has_install && !install_pinned)
+        open_about_modal(NULL);
 
     /* Expire any pending +/- temporary override once the schedule advances. */
     boxtalk_tick();
@@ -1337,11 +1518,15 @@ static void refresh_cb(lv_timer_t * t) {
     struct tm tm;
     localtime_r(&now, &tm);
     char clk[16];
-    strftime(clk, sizeof(clk), "%H:%M", &tm);
+    strftime(clk, sizeof(clk), "%H %M", &tm);   /* space; pulsing colon overlays */
     lv_label_set_text(lbl_t_clock, clk);
+    /* Re-centre the ":" overlay on the (now real-width) clock — the create-time
+     * align used the narrower "-- --" placeholder, which left the colon sitting
+     * on a digit instead of in the gap (so it looked missing on the device). */
+    if (lbl_t_clock_colon) lv_obj_align_to(lbl_t_clock_colon, lbl_t_clock, LV_ALIGN_CENTER, 0, 0);
     if (lbl_t_date) {
         char dt[48];
-        strftime(dt, sizeof(dt), "%a %d %b", &tm);
+        i18n_date_short(dt, sizeof(dt), &tm);   /* localised — strftime is C-locale (always English) */
         lv_label_set_text(lbl_t_date, dt);
     }
     /* Refresh the moon-phase icon at most once per refresh tick — phase
@@ -1366,55 +1551,42 @@ static void refresh_cb(lv_timer_t * t) {
      * temperature, no arrow). */
     if (toon_state.setpoint > 0) {
         if (toon_state.burner_on)
-            lv_label_set_text_fmt(lbl_t_setpoint, "to %.1f°C", toon_state.setpoint);
+            lv_label_set_text_fmt(lbl_t_setpoint, tr("naar %.1f°C", "to %.1f°C"), toon_state.setpoint);
         else
             lv_label_set_text_fmt(lbl_t_setpoint, "%.1f°C", toon_state.setpoint);
     } else {
         lv_label_set_text(lbl_t_setpoint, "");
     }
 
-    /* Mode toggle + preset highlighting in one pass.  on_schedule treats a
-     * +/- temporary override as "still on the schedule" — the schedule
-     * daemon is parked at active_state=-1 server-side but the override
-     * tick will swing it back, so the UI shouldn't pretend we're in Manual. */
-    int temp_origin = boxtalk_temp_override_origin();   /* -1 if none */
-    int on_schedule = (toon_state.active_state >= 0) || (temp_origin >= 0);
+    /* Mirror the stock UI's setActiveProgramState() (Toon mobile.js, the HCB web
+     * app — the authoritative reference). Two INDEPENDENT things:
+     *   1. the active preset (activeState 0..3) is highlighted ALWAYS — even in
+     *      Manual (stock adds 'ui-btn-sel' to activeState regardless of mode);
+     *   2. the Manual/Program toggle reflects programState only: "program" for
+     *      BASE/TEMPOVERRIDE/PROGOVERRIDE/LOCKEDBASE (1/2/3/8), "manual" for
+     *      MANUAL/HOLIDAY (0/4/5). */
+    int ps = toon_state.program_state;
+    int on_program = (ps == 1 || ps == 2 || ps == 3 || ps == 8);
 
     if (tile_btn_mode_manual)
-        lv_obj_set_style_border_width(tile_btn_mode_manual,
-                                      on_schedule ? 0 : 2, 0);
+        lv_obj_set_style_border_width(tile_btn_mode_manual,  on_program ? 0 : 2, 0);
     if (tile_btn_mode_program)
-        lv_obj_set_style_border_width(tile_btn_mode_program,
-                                      on_schedule ? 2 : 0, 0);
+        lv_obj_set_style_border_width(tile_btn_mode_program, on_program ? 2 : 0, 0);
+    if (lbl_t_program)
+        lv_label_set_text(lbl_t_program, tr("Programma", "Program"));
 
-    /* Program-button label: just "Program" normally, "Program*" while a
-     * +/- temporary override is outstanding (the schedule will reassert
-     * itself at the next switch). The active preset is identifiable from
-     * the highlighted button on the preset row below — no need to also
-     * carry it inside the mode-toggle label. */
-    int preset;
-    if (toon_state.active_state >= 0 &&
-        toon_state.program_state >= 0 && toon_state.program_state <= 3) {
-        preset = toon_state.program_state;
-    } else {
-        preset = temp_origin;
-    }
-    if (lbl_t_program) {
-        lv_label_set_text(lbl_t_program,
-            boxtalk_temp_override_active() ? "Program*" : "Program");
-    }
-
-    /* Direct-preset row: white border on whichever preset is currently in
-     * effect. While a +/- temporary override is armed the schedule has
-     * been parked at active_state=-1 server-side, so fall back to the
-     * captured origin preset so the highlight survives the nudge. Manual
-     * mode (no override either) drops all borders. */
+    /* Preset row: white border on activeState's preset — always (stock). The
+     * whole row is DIMMED in Manual (freetoon choice, not stock) to signal the
+     * presets aren't driving the setpoint right now; full opacity on program. */
     {
-        int hi = on_schedule ? preset : -1;
+        int hi = (toon_state.active_state >= 0 && toon_state.active_state <= 3)
+                     ? toon_state.active_state : -1;
+        lv_opa_t row_opa = on_program ? LV_OPA_COVER : LV_OPA_40;
         for (int i = 0; i < 4; i++) {
             if (!tile_btn_preset[i]) continue;
             lv_obj_set_style_border_width(tile_btn_preset[i],
                                           (i == hi) ? 2 : 0, 0);
+            lv_obj_set_style_opa(tile_btn_preset[i], row_opa, 0);
         }
     }
 
@@ -1452,30 +1624,32 @@ static void refresh_cb(lv_timer_t * t) {
                                       lv_color_hex(0xff3344), 0);
             lv_obj_set_style_bg_opa(pressure_banner, LV_OPA_COVER, 0);
             lv_label_set_text_fmt(pressure_banner_lbl,
-                                  "CH water pressure CRITICAL: %.1f bar", p);
+                                  tr("CV-waterdruk KRITIEK: %.1f bar",
+                                     "CH water pressure CRITICAL: %.1f bar"), p);
             lv_obj_clear_flag(pressure_banner, LV_OBJ_FLAG_HIDDEN);
         } else if (p > 0.1f && p < 0.8f) {
             lv_obj_set_style_bg_color(pressure_banner,
                                       lv_color_hex(0xffcc44), 0);
             lv_obj_set_style_bg_opa(pressure_banner, LV_OPA_COVER, 0);
             lv_label_set_text_fmt(pressure_banner_lbl,
-                                  "CH water pressure low: %.1f bar", p);
+                                  tr("CV-waterdruk laag: %.1f bar",
+                                     "CH water pressure low: %.1f bar"), p);
             lv_obj_clear_flag(pressure_banner, LV_OBJ_FLAG_HIDDEN);
         } else {
             lv_obj_add_flag(pressure_banner, LV_OBJ_FLAG_HIDDEN);
         }
     }
     if (lbl_t_humidity && toon_state.humidity > 0)
-        lv_label_set_text_fmt(lbl_t_humidity, "RH %.0f%%",
+        lv_label_set_text_fmt(lbl_t_humidity, tr("RV %.0f%%", "RH %.0f%%"),
                               toon_state.humidity);
     if (lbl_t_ppm && toon_state.eco2)
         lv_label_set_text_fmt(lbl_t_ppm, "%d ppm", toon_state.eco2);
     if (lbl_t_tvoc && toon_state.tvoc)
-        lv_label_set_text_fmt(lbl_t_tvoc, "TVOC %d", toon_state.tvoc);
+        lv_label_set_text_fmt(lbl_t_tvoc, tr("TVOC %d", "TVOC %d"), toon_state.tvoc);
     if (lbl_t_aq) {
         const char * aql = air_quality_label(toon_state.eco2, toon_state.tvoc);
         if (*aql) {
-            lv_label_set_text_fmt(lbl_t_aq, "Air: %s", aql);
+            lv_label_set_text_fmt(lbl_t_aq, tr("Lucht: %s", "Air: %s"), aql);
             lv_obj_set_style_text_color(lbl_t_aq,
                 lv_color_hex(air_quality_color(toon_state.eco2, toon_state.tvoc)),
                 0);
@@ -1513,7 +1687,7 @@ static void refresh_cb(lv_timer_t * t) {
             lv_label_set_text(lbl_waste_date,
                               waste_state.connected ? "--" : "...");
             lv_label_set_text(lbl_waste_type,
-                              waste_state.connected ? "geen" : "");
+                              waste_state.connected ? tr("geen", "none") : "");
         }
         if (n >= 2 && lbl_waste_date_2 && lbl_waste_type_2 && waste_icon_2) {
             int mo = atoi(p2.date + 5), d = atoi(p2.date + 8);
@@ -1551,8 +1725,8 @@ static void refresh_cb(lv_timer_t * t) {
         }
         if (lbl_energy_gas) {
             float g = energy_gas_m3();
-            if (g >= 0) lv_label_set_text_fmt(lbl_energy_gas, "%.0f m3 gas", g);
-            else if (energy_connected()) lv_label_set_text(lbl_energy_gas, "via meter");
+            if (g >= 0) lv_label_set_text_fmt(lbl_energy_gas, tr("%.0f m3 gas", "%.0f m3 gas"), g);
+            else if (energy_connected()) lv_label_set_text(lbl_energy_gas, tr("via meter", "via meter"));
         }
     }
     /* NILM transient device label — visible for 10 s after a step-change event */
@@ -1578,9 +1752,24 @@ static void refresh_cb(lv_timer_t * t) {
              * (unless hide_offline_tiles is on, in which case the whole
              * tile is already hidden by apply_offline_tile_visibility) but
              * make it obvious why no data is flowing. */
-            lv_label_set_text(lbl_boiler_state, "Itho offline");
+            const char * itho_off = tr("Itho offline", "Itho offline");
+            lv_label_set_text(lbl_boiler_state, itho_off);
             if (tile_vent)
-                fit_font(lbl_boiler_state, "Itho offline",
+                fit_font(lbl_boiler_state, itho_off,
+                         lv_obj_get_content_width(tile_vent) - SX(64), 18);
+            if (vent_btn_low)   lv_obj_set_style_border_width(vent_btn_low,   0, 0);
+            if (vent_btn_high)  lv_obj_set_style_border_width(vent_btn_high,  0, 0);
+            if (vent_btn_auto)  lv_obj_set_style_border_width(vent_btn_auto,  0, 0);
+            if (vent_btn_timer) lv_obj_set_style_border_width(vent_btn_timer, 0, 0);
+        } else if (vent_state.connected && vent_state.itho_online == 0) {
+            /* Itho bridge reported itself OFFLINE via its MQTT LWT
+             * (topic itho/lwt). The broker link is up but the add-on/unit
+             * is gone — surface it here on the home/main tile. The dim
+             * screen deliberately shows only the mode, not online/offline. */
+            const char * itho_off = tr("Itho offline", "Itho offline");
+            lv_label_set_text(lbl_boiler_state, itho_off);
+            if (tile_vent)
+                fit_font(lbl_boiler_state, itho_off,
                          lv_obj_get_content_width(tile_vent) - SX(64), 18);
             if (vent_btn_low)   lv_obj_set_style_border_width(vent_btn_low,   0, 0);
             if (vent_btn_high)  lv_obj_set_style_border_width(vent_btn_high,  0, 0);
@@ -1594,15 +1783,20 @@ static void refresh_cb(lv_timer_t * t) {
             memcpy(fi_local, (const char *)vent_state.fan_info,
                    sizeof(fi_local));
             fi_local[sizeof(fi_local) - 1] = 0;
-            const char * preset = fi_local[0] ? fi_local : "?";
-            char preset_pretty[16] = {0};
-            /* "low"/"high" → "Low"/"High"; preserve "auto"/"medium"/"timer" */
-            snprintf(preset_pretty, sizeof(preset_pretty), "%c%s",
-                     (preset[0] >= 'a' && preset[0] <= 'z')
-                         ? preset[0] - 'a' + 'A' : preset[0],
-                     preset + 1);
-            /* Title is just the mode ("Low"/"High"/"Auto"/"Timer 20m"). The
-             * source ("via API"/"via TOON") stays on the lower line only. */
+            /* Current Itho firmware no longer publishes FanInfo, so fall
+             * back to last_cmd (itho/lastcmd MQTT) for the live mode. Both
+             * are already swap-corrected to the user-intent label. */
+            if (!fi_local[0]) {
+                memcpy(fi_local, (const char *)vent_state.last_cmd,
+                       sizeof(fi_local));
+                fi_local[sizeof(fi_local) - 1] = 0;
+            }
+            /* Title is the clean mode word ("Low"/"High"/"Auto"/"Manual"/
+             * "Timer 20m"); vent_mode_label() maps the raw "speed:N" the
+             * slider produces to "Manual". The source ("via API"/"via TOON")
+             * stays on the lower line only. fi_local is still used below for
+             * the per-button highlight. */
+            const char * preset_pretty = vent_mode_label();
             char vshown[32];
             if (vent_state.remaining_min > 0)
                 snprintf(vshown, sizeof vshown, "%s %dm",
@@ -1623,7 +1817,7 @@ static void refresh_cb(lv_timer_t * t) {
             int act_high  = strcmp(fi_local, "high")   == 0;
             int act_auto  = strcmp(fi_local, "auto")   == 0
                          || strcmp(fi_local, "medium") == 0;
-            int act_timer = strcmp(fi_local, "timer")  == 0
+            int act_timer = strncasecmp(fi_local, "timer", 5) == 0
                          || vent_state.remaining_min > 0;
             if (act_timer) { act_low = act_high = act_auto = 0; }
             if (vent_btn_low)
@@ -1635,7 +1829,7 @@ static void refresh_cb(lv_timer_t * t) {
             if (vent_btn_timer)
                 lv_obj_set_style_border_width(vent_btn_timer, act_timer ? 2 : 0, 0);
         } else {
-            lv_label_set_text(lbl_boiler_state, "off");
+            lv_label_set_text(lbl_boiler_state, tr("uit", "off"));
             if (vent_btn_low)   lv_obj_set_style_border_width(vent_btn_low,   0, 0);
             if (vent_btn_high)  lv_obj_set_style_border_width(vent_btn_high,  0, 0);
             if (vent_btn_auto)  lv_obj_set_style_border_width(vent_btn_auto,  0, 0);
@@ -1643,7 +1837,7 @@ static void refresh_cb(lv_timer_t * t) {
         }
     }
     if (!slot_active[TILE_SLOT_VENT] && lbl_boiler_pressure) {
-        if (vent_state.connected) {
+        if (vent_state.connected && vent_state.itho_online != 0) {
             /* Classify source into a 3-char tag so the line stays compact:
                API = HTML/vremote (toonui or HA), RF  = physical radio remote,
                BTN = Itho front-panel button, ???  = anything unrecognised. */
@@ -1674,12 +1868,13 @@ static void refresh_cb(lv_timer_t * t) {
              * setpoint lies — it reads 100% for the wire-"high" command which
              * on this unit is the LOW-airflow direction). */
             lv_label_set_text_fmt(lbl_boiler_pressure,
-                                  "%d%%  %drpm\nvia %s",
+                                  tr("%d%%  %drpm\nvia %s", "%d%%  %drpm\nvia %s"),
                                   vent_state.speed_pct,
                                   vent_state.fan_rpm,
                                   src_tag);
         } else {
-            lv_label_set_text(lbl_boiler_pressure, "-- %");
+            lv_label_set_text(lbl_boiler_pressure,
+                              vent_state.itho_online == 0 ? tr("offline", "offline") : "-- %");
         }
     }
     /* Spin tracks the real fan rpm. With the wire swap, user-Low maps to the
@@ -1688,33 +1883,42 @@ static void refresh_cb(lv_timer_t * t) {
     if (vent_state.connected)
         vent_apply_fan_anim(vent_state.fan_rpm);
 
-    /* Curtains tile — state + position + battery from the HA poller.
-       Spinner is shown only while actively moving; the position bar always
-       reflects the live percentage. */
-    if (lbl_curtain_state) {
-        if (ha_state.connected) {
-            const char * s = ha_state.curtain_state[0]
-                             ? ha_state.curtain_state : "?";
-            char pretty[32] = {0};
-            snprintf(pretty, sizeof(pretty), "%c%s",
-                     (s[0] >= 'a' && s[0] <= 'z') ? s[0] - 'a' + 'A' : s[0],
-                     s + 1);
-            lv_label_set_text_fmt(lbl_curtain_state,
-                                  "Gordijnen %s %d%%  bat %d%%",
-                                  pretty,
-                                  ha_state.curtain_pos,
-                                  ha_state.curtain_battery);
-            if (curt_bar) lv_bar_set_value(curt_bar, ha_state.curtain_pos,
-                                           LV_ANIM_ON);
-            if (curt_spinner) {
-                int moving = (!strcmp(s, "opening") || !strcmp(s, "closing"));
-                if (moving) lv_obj_clear_flag(curt_spinner, LV_OBJ_FLAG_HIDDEN);
-                else        lv_obj_add_flag (curt_spinner, LV_OBJ_FLAG_HIDDEN);
-            }
-        } else {
-            lv_label_set_text(lbl_curtain_state, "Gordijnen  (HA offline)");
-            if (curt_spinner) lv_obj_add_flag(curt_spinner, LV_OBJ_FLAG_HIDDEN);
+    /* Pinned device quick-tiles — live state from ha_devices[]. */
+    for (int p = 0; p < home_pin_count; p++) {
+        home_pin_t * P = &home_pins[p];
+        if (P->dev_idx < 0 || P->dev_idx >= ha_device_count || !P->lbl) continue;
+        ha_device_t * D = &ha_devices[P->dev_idx];
+        if (!ha_state.connected) {
+            lv_label_set_text_fmt(P->lbl, tr("%s  (HA offline)", "%s  (HA offline)"), D->name);
+            continue;
         }
+        if (D->type == HADEV_COVER) {
+            const char * s = D->state[0] ? D->state : "?";
+            char pretty[24];
+            snprintf(pretty, sizeof pretty, "%c%s",
+                     (s[0] >= 'a' && s[0] <= 'z') ? s[0] - 'a' + 'A' : s[0], s + 1);
+            lv_label_set_text_fmt(P->lbl, "%s  %s %d%%", D->name, pretty,
+                                  D->position >= 0 ? D->position : 0);
+            if (P->slider && D->position >= 0)
+                lv_slider_set_value(P->slider, D->position, LV_ANIM_ON);
+        } else if (D->type == HADEV_LIGHT || D->type == HADEV_SWITCH) {
+            const char * st = !D->available ? tr("offline", "offline")
+                                            : (D->on ? tr("aan", "on") : tr("uit", "off"));
+            if (D->type == HADEV_LIGHT && D->available && D->on && D->brightness > 0)
+                lv_label_set_text_fmt(P->lbl, tr("%s  aan %d%%", "%s  on %d%%"), D->name, D->brightness * 100 / 255);
+            else
+                lv_label_set_text_fmt(P->lbl, "%s  %s", D->name, st);
+            if (P->btn_lbl) lv_label_set_text(P->btn_lbl, D->on ? tr("Aan", "On") : tr("Uit", "Off"));
+            if (P->btn) lv_obj_set_style_bg_color(P->btn,
+                            lv_color_hex(D->on ? 0xffcc44 : 0x3a4658), 0);
+            if (P->slider && D->type == HADEV_LIGHT) {
+                if (D->on && D->brightness > 0)
+                    lv_slider_set_value(P->slider, D->brightness * 100 / 255, LV_ANIM_OFF);
+                else if (!D->on)
+                    lv_slider_set_value(P->slider, 0, LV_ANIM_OFF);
+            }
+        }
+        /* script/scene: static label + Run button, nothing to refresh */
     }
 
 
@@ -1723,7 +1927,7 @@ static void refresh_cb(lv_timer_t * t) {
         if (energy_connected()) {
             float g = energy_gas_m3();
             if (g >= 0)
-                lv_label_set_text_fmt(lbl_bot_energy, "%.0f W\n%.0f m3 gas",
+                lv_label_set_text_fmt(lbl_bot_energy, tr("%.0f W\n%.0f m3 gas", "%.0f W\n%.0f m3 gas"),
                                       energy_power_w(), g);
             else
                 lv_label_set_text_fmt(lbl_bot_energy, "%.0f W", energy_power_w());
@@ -1733,7 +1937,7 @@ static void refresh_cb(lv_timer_t * t) {
     }
     if (lbl_bot_weather && lv_label_get_text(lbl_bot_weather)
         && strcmp(lv_label_get_text(lbl_bot_weather), "...") == 0)
-        lv_label_set_text(lbl_bot_weather, "(soon)");
+        lv_label_set_text(lbl_bot_weather, tr("(binnenkort)", "(soon)"));
     if (lbl_bot_waste) {
         if (waste_state.connected) {
             char date[16], labels[40];
@@ -1744,7 +1948,7 @@ static void refresh_cb(lv_timer_t * t) {
                 (void)y;
                 lv_label_set_text_fmt(lbl_bot_waste, "%d-%d  %s", d, mo, labels);
             } else {
-                lv_label_set_text(lbl_bot_waste, "geen");
+                lv_label_set_text(lbl_bot_waste, tr("geen", "none"));
             }
         } else {
             lv_label_set_text(lbl_bot_waste, "...");
@@ -1759,12 +1963,13 @@ static void refresh_cb(lv_timer_t * t) {
     if (!slot_active[TILE_SLOT_WATER]) {
         if (lbl_inbox_main) {
             if (!settings.enable_p1_water)
-                lv_label_set_text(lbl_inbox_main, "offline");
+                lv_label_set_text(lbl_inbox_main, tr("offline", "offline"));
             else if (hw_state.connected_water)
                 lv_label_set_text_fmt(lbl_inbox_main, "%.3f m3", hw_state.water_total_m3);
             else
                 lv_label_set_text(lbl_inbox_main,
-                                  hw_state.polled_water ? "WTR offline" : "Initializing...");
+                                  hw_state.polled_water ? tr("WTR offline", "WTR offline")
+                                                        : tr("Initialiseren...", "Initializing..."));
         }
         if (lbl_inbox_sub) {
             if (!settings.enable_p1_water || !hw_state.connected_water) {
@@ -1774,7 +1979,7 @@ static void refresh_cb(lv_timer_t * t) {
                                       hw_state.water_lpm,
                                       hw_state.water_session_l);
             } else if (hw_state.water_session_l > 0) {
-                lv_label_set_text_fmt(lbl_inbox_sub, "+%.1f L just poured",
+                lv_label_set_text_fmt(lbl_inbox_sub, tr("+%.1f L zojuist getapt", "+%.1f L just poured"),
                                       hw_state.water_session_l);
             } else {
                 lv_label_set_text(lbl_inbox_sub, "0.0 L/min");
@@ -1923,9 +2128,9 @@ static void refresh_cb(lv_timer_t * t) {
     /* "Medemblik - 14.7 C now" header above the forecast strip. Life360
      * moved to its own tile so this stays purely weather. */
     if (lbl_forecast_city) {
-        const char * city = settings.weather_location[0] ? settings.weather_location : "Forecast";
+        const char * city = settings.weather_location[0] ? settings.weather_location : tr("Weer", "Forecast");
         if (weather_state.connected)
-            lv_label_set_text_fmt(lbl_forecast_city, "%s  -  %.1f°C now",
+            lv_label_set_text_fmt(lbl_forecast_city, tr("%s  -  %.1f°C nu", "%s  -  %.1f°C now"),
                                   city, weather_state.current_temp);
         else
             lv_label_set_text(lbl_forecast_city, city);
@@ -1939,7 +2144,7 @@ static void refresh_cb(lv_timer_t * t) {
     if (!slot_active[TILE_SLOT_FAMILY]) {
         if (lbl_life360_a) {
             if (!settings.enable_ha)
-                lv_label_set_text(lbl_life360_a, "HA offline");
+                lv_label_set_text(lbl_life360_a, tr("HA offline", "HA offline"));
             else
                 lv_label_set_text_fmt(lbl_life360_a, "%s: %s",
                     settings.life360_a_name[0] ? settings.life360_a_name : "A",
@@ -1978,7 +2183,7 @@ static void refresh_cb(lv_timer_t * t) {
         if (energy_connected()) {
             float g = energy_gas_m3();
             if (g >= 0)
-                lv_label_set_text_fmt(lbl_bot_energy, "%.0f W\n%.0f m3 gas",
+                lv_label_set_text_fmt(lbl_bot_energy, tr("%.0f W\n%.0f m3 gas", "%.0f W\n%.0f m3 gas"),
                                       energy_power_w(), g);
             else
                 lv_label_set_text_fmt(lbl_bot_energy, "%.0f W", energy_power_w());
@@ -1988,7 +2193,7 @@ static void refresh_cb(lv_timer_t * t) {
     }
     if (lbl_bot_weather && lv_label_get_text(lbl_bot_weather)
         && strcmp(lv_label_get_text(lbl_bot_weather), "...") == 0)
-        lv_label_set_text(lbl_bot_weather, "(soon)");
+        lv_label_set_text(lbl_bot_weather, tr("(binnenkort)", "(soon)"));
     if (lbl_bot_waste) {
         if (waste_state.connected) {
             char date[16], labels[40];
@@ -1999,7 +2204,7 @@ static void refresh_cb(lv_timer_t * t) {
                 (void)y;
                 lv_label_set_text_fmt(lbl_bot_waste, "%d-%d  %s", d, mo, labels);
             } else {
-                lv_label_set_text(lbl_bot_waste, "geen");
+                lv_label_set_text(lbl_bot_waste, tr("geen", "none"));
             }
         } else {
             lv_label_set_text(lbl_bot_waste, "...");
@@ -2014,12 +2219,13 @@ static void refresh_cb(lv_timer_t * t) {
     if (!slot_active[TILE_SLOT_WATER]) {
         if (lbl_inbox_main) {
             if (!settings.enable_p1_water)
-                lv_label_set_text(lbl_inbox_main, "offline");
+                lv_label_set_text(lbl_inbox_main, tr("offline", "offline"));
             else if (hw_state.connected_water)
                 lv_label_set_text_fmt(lbl_inbox_main, "%.3f m3", hw_state.water_total_m3);
             else
                 lv_label_set_text(lbl_inbox_main,
-                                  hw_state.polled_water ? "WTR offline" : "Initializing...");
+                                  hw_state.polled_water ? tr("WTR offline", "WTR offline")
+                                                        : tr("Initialiseren...", "Initializing..."));
         }
         if (lbl_inbox_sub) {
             if (!settings.enable_p1_water || !hw_state.connected_water) {
@@ -2029,7 +2235,7 @@ static void refresh_cb(lv_timer_t * t) {
                                       hw_state.water_lpm,
                                       hw_state.water_session_l);
             } else if (hw_state.water_session_l > 0) {
-                lv_label_set_text_fmt(lbl_inbox_sub, "+%.1f L just poured",
+                lv_label_set_text_fmt(lbl_inbox_sub, tr("+%.1f L zojuist getapt", "+%.1f L just poured"),
                                       hw_state.water_session_l);
             } else {
                 lv_label_set_text(lbl_inbox_sub, "0.0 L/min");
@@ -2094,7 +2300,7 @@ static void refresh_cb(lv_timer_t * t) {
         if (energy_connected()) {
             float g = energy_gas_m3();
             if (g >= 0)
-                lv_label_set_text_fmt(lbl_bot_energy, "%.0f W\n%.0f m3 gas",
+                lv_label_set_text_fmt(lbl_bot_energy, tr("%.0f W\n%.0f m3 gas", "%.0f W\n%.0f m3 gas"),
                                       energy_power_w(), g);
             else
                 lv_label_set_text_fmt(lbl_bot_energy, "%.0f W", energy_power_w());
@@ -2203,14 +2409,32 @@ static void on_home_gesture_to_lights(lv_event_t * e) {
  * opens the lights backend on release. */
 static lv_obj_t * lights_handle     = NULL;
 static lv_obj_t * lights_handle_lbl = NULL;
+static lv_obj_t * lights_handle_img = NULL;   /* backend logo (HA / Domoticz) */
 
 static void lights_handle_set(bool open) {
     if (!lights_handle) return;
-    lv_obj_set_size(lights_handle, open ? 132 : 22, open ? 56 : 64);
-    lv_obj_align(lights_handle, LV_ALIGN_LEFT_MID, open ? 2 : -10, 0);
+    lv_obj_set_size(lights_handle, open ? 160 : 56, open ? 56 : 80);
+    lv_obj_align(lights_handle, LV_ALIGN_LEFT_MID, open ? 4 : -4, 0);
     lv_obj_set_style_radius(lights_handle, open ? 16 : LV_RADIUS_CIRCLE, 0);
-    if (open) lv_obj_clear_flag(lights_handle_lbl, LV_OBJ_FLAG_HIDDEN);
-    else      lv_obj_add_flag(lights_handle_lbl, LV_OBJ_FLAG_HIDDEN);
+    if (open) {
+        /* Expanded: word label, hide the logo. */
+        if (lights_handle_img) lv_obj_add_flag(lights_handle_img, LV_OBJ_FLAG_HIDDEN);
+        if (lights_handle_lbl) {
+            lv_label_set_text(lights_handle_lbl, tr("Apparaten", "Devices"));
+            lv_obj_set_style_text_font(lights_handle_lbl, SF(22), 0);
+            lv_obj_clear_flag(lights_handle_lbl, LV_OBJ_FLAG_HIDDEN);
+        }
+    } else {
+        /* Collapsed: the backend logo if we have one, else the charge glyph. */
+        if (lights_handle_img) {
+            lv_obj_clear_flag(lights_handle_img, LV_OBJ_FLAG_HIDDEN);
+            if (lights_handle_lbl) lv_obj_add_flag(lights_handle_lbl, LV_OBJ_FLAG_HIDDEN);
+        } else if (lights_handle_lbl) {
+            lv_label_set_text(lights_handle_lbl, LV_SYMBOL_CHARGE);
+            lv_obj_set_style_text_font(lights_handle_lbl, SF(28), 0);
+            lv_obj_clear_flag(lights_handle_lbl, LV_OBJ_FLAG_HIDDEN);
+        }
+    }
 }
 static void on_lights_handle(lv_event_t * e) {
     switch (lv_event_get_code(e)) {
@@ -2256,7 +2480,7 @@ static void news_show_body(int i) {
     news_body(i, body, sizeof body);
     if (news_body_title) lv_label_set_text(news_body_title, title);
     if (news_body_lbl)   lv_label_set_text(news_body_lbl,
-                             body[0] ? body : "(geen samenvatting beschikbaar)");
+                             body[0] ? body : tr("(geen samenvatting beschikbaar)", "(no summary available)"));
 }
 static void on_news_item(lv_event_t * e) {
     news_show_body((int)(intptr_t)lv_event_get_user_data(e));
@@ -2346,7 +2570,7 @@ static void on_news_tap(lv_event_t * e) {
     lv_obj_t * t = lv_label_create(card);
     lv_obj_set_style_text_font(t, SF(28), 0);
     lv_obj_set_style_text_color(t, lv_color_hex(0xffffff), 0);
-    lv_label_set_text(t, "Nieuws");
+    lv_label_set_text(t, tr("Nieuws", "News"));
     lv_obj_align(t, LV_ALIGN_TOP_LEFT, SX(16), SY(12));
 
     news_list = lv_list_create(card);
@@ -2384,7 +2608,7 @@ static void on_news_tap(lv_event_t * e) {
     lv_obj_set_size(x, SX(130), SY(48));
     lv_obj_align(x, LV_ALIGN_BOTTOM_RIGHT, SX(-16), SY(-12));
     lv_obj_add_event_cb(x, news_modal_close, LV_EVENT_CLICKED, NULL);
-    lv_obj_t * xl = lv_label_create(x); lv_label_set_text(xl, "Sluiten"); lv_obj_center(xl);
+    lv_obj_t * xl = lv_label_create(x); lv_label_set_text(xl, tr("Sluiten", "Close")); lv_obj_center(xl);
 }
 
 /* Open the news reader from elsewhere (e.g. Settings → News) so it's reachable
@@ -2428,7 +2652,8 @@ static void * map_fetch_thread(void * arg) {
         for (int col = 0; col < 2; col++) {
             int tx = left + col, ty = top + row;
             tx = ((tx % n) + n) % n;
-            if (ty < 0) ty = 0; if (ty >= n) ty = n - 1;
+            if (ty < 0) ty = 0;
+            if (ty >= n) ty = n - 1;
             char cmd[400];
             snprintf(cmd, sizeof cmd,
                 "curl -fsSL -m 12 -A 'freetoon-map/1.0' -o /tmp/map_%d.png "
@@ -2445,7 +2670,7 @@ static void map_tick(lv_timer_t * t) {
     if (g_map_ready == 0) return;                 /* still downloading */
     if (map_timer) { lv_timer_del(map_timer); map_timer = NULL; }
     if (g_map_ready < 0) {
-        if (map_status) lv_label_set_text(map_status, "Kaart laden mislukt (geen internet?)");
+        if (map_status) lv_label_set_text(map_status, tr("Kaart laden mislukt (geen internet?)", "Map load failed (no internet?)"));
         return;
     }
     static const char * paths[4] = {
@@ -2486,10 +2711,10 @@ static void start_map_fetch(int person) {
     if (map_status)   lv_obj_clear_flag(map_status, LV_OBJ_FLAG_HIDDEN);
 
     if (lat == 0.0f && lon == 0.0f) {
-        if (map_status) lv_label_set_text(map_status, "Geen GPS-locatie bekend");
+        if (map_status) lv_label_set_text(map_status, tr("Geen GPS-locatie bekend", "No GPS location known"));
         return;
     }
-    if (map_status) lv_label_set_text(map_status, "Kaart laden...");
+    if (map_status) lv_label_set_text(map_status, tr("Kaart laden...", "Loading map..."));
     g_map_ready = 0;
 #ifdef WASM_BUILD
     /* WASM: no pthread + no system("curl"). Compute the 4 tile coords here
@@ -2526,7 +2751,7 @@ static void start_map_fetch(int person) {
     r->lat = lat; r->lon = lon; r->zoom = g_map_zoom;
     pthread_t th;
     if (pthread_create(&th, NULL, map_fetch_thread, r) == 0) pthread_detach(th);
-    else { free(r); if (map_status) lv_label_set_text(map_status, "Kaart laden mislukt"); return; }
+    else { free(r); if (map_status) lv_label_set_text(map_status, tr("Kaart laden mislukt", "Map load failed")); return; }
     if (!map_timer) map_timer = lv_timer_create(map_tick, 300, NULL);
 }
 
@@ -2594,7 +2819,7 @@ static void open_family_map(lv_event_t * e) {
     lv_obj_t * h = lv_label_create(card);
     lv_obj_set_style_text_font(h, SF(28), 0);
     lv_obj_set_style_text_color(h, lv_color_hex(0xffffff), 0);
-    lv_label_set_text(h, "Locatie");
+    lv_label_set_text(h, tr("Locatie", "Location"));
     lv_obj_align(h, LV_ALIGN_TOP_LEFT, SX(16), SY(10));
 
     /* Header subtitle: who is selected + their address. */
@@ -2631,7 +2856,7 @@ static void open_family_map(lv_event_t * e) {
     lv_obj_set_style_text_color(map_status, lv_color_hex(0xcdd9e6), 0);
     lv_obj_set_style_text_font(map_status, SF(20), 0);
     lv_obj_center(map_status);
-    lv_label_set_text(map_status, "Kaart laden...");
+    lv_label_set_text(map_status, tr("Kaart laden...", "Loading map..."));
 
     /* Right column: address + zoom + A/B switch + close. */
     int px = 16 + MAP_TILE_DISP * 2 + 16;     /* just right of the map */
@@ -2681,7 +2906,7 @@ static void open_family_map(lv_event_t * e) {
     lv_obj_align(x, LV_ALIGN_BOTTOM_RIGHT, SX(-14), SY(-12));
     lv_obj_set_style_bg_color(x, lv_color_hex(0x3a6090), 0);
     lv_obj_add_event_cb(x, map_close, LV_EVENT_CLICKED, NULL);
-    lv_obj_t * xl = lv_label_create(x); lv_label_set_text(xl, "Sluiten"); lv_obj_center(xl);
+    lv_obj_t * xl = lv_label_create(x); lv_label_set_text(xl, tr("Sluiten", "Close")); lv_obj_center(xl);
 
     start_map_fetch(0);
 }
@@ -2746,8 +2971,20 @@ lv_obj_t * screen_home_create(void) {
     lbl_t_clock = lv_label_create(th);
     lv_obj_set_style_text_color(lbl_t_clock, lv_color_hex(COL_TEXT_HI), 0);
     lv_obj_set_style_text_font(lbl_t_clock, SF(28), 0);
-    lv_label_set_text(lbl_t_clock, "--:--");
+    lv_label_set_text(lbl_t_clock, "-- --");
     lv_obj_align(lbl_t_clock, LV_ALIGN_TOP_LEFT, clock_dx, 0);
+
+    /* Pulsing ":" overlay centred on the clock (in the "HH MM" middle space) —
+     * separate label so the digits don't jitter as the colon fades. */
+    lbl_t_clock_colon = lv_label_create(th);
+    lv_obj_set_style_text_color(lbl_t_clock_colon, lv_color_hex(COL_TEXT_HI), 0);
+    lv_obj_set_style_text_font(lbl_t_clock_colon, SF(28), 0);
+    lv_label_set_text(lbl_t_clock_colon, ":");
+    /* Force the clock's geometry to be computed so align_to reads real coords
+     * (without this the colon can land at 0,0 of the tile and look "missing"). */
+    lv_obj_update_layout(lbl_t_clock);
+    lv_obj_align_to(lbl_t_clock_colon, lbl_t_clock, LV_ALIGN_CENTER, 0, 0);
+    clock_colon_pulse(lbl_t_clock_colon);
 
     /* Date directly under the clock so the top-left corner is a full
        date+time block. */
@@ -2822,7 +3059,7 @@ lv_obj_t * screen_home_create(void) {
     lbl_t_setpoint = lv_label_create(sp_row);
     lv_obj_set_style_text_color(lbl_t_setpoint, lv_color_hex(COL_TEXT_HI), 0);
     lv_obj_set_style_text_font(lbl_t_setpoint, SF(28), 0);
-    lv_label_set_text(lbl_t_setpoint, "to -- C");
+    lv_label_set_text(lbl_t_setpoint, tr("naar -- C", "to -- C"));
     lv_obj_align(lbl_t_setpoint, LV_ALIGN_CENTER, 0, 0);
 
     lv_obj_t * btn_up = lv_btn_create(sp_row);
@@ -2837,6 +3074,10 @@ lv_obj_t * screen_home_create(void) {
     lv_obj_set_style_text_font(btn_up_lbl, SF(48), 0);
     lv_obj_set_style_text_color(btn_up_lbl, lv_color_hex(0xffffff), 0);
     lv_obj_center(btn_up_lbl);
+
+    /* Camera button — icon-only, stacked above the "+". Self-gated: only
+     * appears when video is enabled (no-op on Toon 2 / when disabled). */
+    video_install_button(th, btn_up);
 
     /* Mode toggle row — Manual | Program, both tappable. Active mode gets
      * a white outline. Buttons are compact (110 + 140) — the active preset
@@ -2860,7 +3101,7 @@ lv_obj_t * screen_home_create(void) {
         lv_obj_add_event_cb(tile_btn_mode_manual, on_mode_manual,
                             LV_EVENT_CLICKED, NULL);
         lv_obj_t * ml = lv_label_create(tile_btn_mode_manual);
-        lv_label_set_text(ml, "Manual");
+        lv_label_set_text(ml, tr("Handmatig", "Manual"));
         lv_obj_set_style_text_color(ml, lv_color_hex(0xffffff), 0);
         lv_obj_set_style_text_font(ml, SF(22), 0);
         lv_obj_center(ml);
@@ -2876,7 +3117,7 @@ lv_obj_t * screen_home_create(void) {
         lv_obj_add_event_cb(tile_btn_mode_program, on_mode_program,
                             LV_EVENT_CLICKED, NULL);
         lbl_t_program = lv_label_create(tile_btn_mode_program);
-        lv_label_set_text(lbl_t_program, "Program");
+        lv_label_set_text(lbl_t_program, tr("Programma", "Program"));
         lv_obj_set_style_text_color(lbl_t_program, lv_color_hex(0xffffff), 0);
         lv_obj_set_style_text_font(lbl_t_program, SF(22), 0);
         lv_obj_center(lbl_t_program);
@@ -2889,7 +3130,8 @@ lv_obj_t * screen_home_create(void) {
      * clip at 18-pt; row centred at +118 so it sits between the pill
      * (bottom ~y=276) and the metrics strip (top ~y=334). */
     {
-        const char * names[4] = {"Comfort", "Home", "Sleep", "Away"};
+        const char * names[4] = {tr("Comfort", "Comfort"), tr("Thuis", "Home"),
+                                 tr("Slapen", "Sleep"), tr("Weg", "Away")};
         uint32_t     cols[4]  = {0xcc7733, 0x3377cc, 0x553388, 0x557788};
         const int    bw = 78, bh = 34, gap = 4;
         int total = 4 * bw + 3 * gap;
@@ -2920,17 +3162,21 @@ lv_obj_t * screen_home_create(void) {
     lbl_t_burner = lv_label_create(th);
     lv_obj_set_style_text_color(lbl_t_burner, lv_color_hex(COL_BURNER_RED), 0);
     lv_obj_set_style_text_font(lbl_t_burner, SF(22), 0);
-    lv_label_set_text(lbl_t_burner, "idle");
+    lv_label_set_text(lbl_t_burner, tr("inactief", "idle"));
     lv_obj_align(lbl_t_burner, LV_ALIGN_BOTTOM_MID, 30, -40);
 
     /* Bottom strip: humidity | eCO2 | TVOC | water-pressure on one row.
        Font 18 keeps the 4 values from running into each other on a
        520-wide tile. y offset 0 pins them flush with the tile bottom
-       so the mode-toggle and preset rows above have more breathing room. */
+       so the mode-toggle and preset rows above have more breathing room.
+       humidity/eCO2/TVOC come from the eCO2/TVOC air sensor that only
+       Toon 2 has -- omit them on Toon 1 (the update sites null-check, so
+       leaving these NULL just hides them; water-pressure stays). */
+#ifndef TOON1
     lbl_t_humidity = lv_label_create(th);
     lv_obj_set_style_text_color(lbl_t_humidity, lv_color_hex(COL_TEXT_DIM), 0);
     lv_obj_set_style_text_font(lbl_t_humidity, SF(18), 0);
-    lv_label_set_text(lbl_t_humidity, "RH --%");
+    lv_label_set_text(lbl_t_humidity, tr("RV --%", "RH --%"));
     lv_obj_align(lbl_t_humidity, LV_ALIGN_BOTTOM_LEFT, 12, 8);
 
     lbl_t_ppm = lv_label_create(th);
@@ -2944,6 +3190,7 @@ lv_obj_t * screen_home_create(void) {
     lv_obj_set_style_text_font(lbl_t_tvoc, SF(18), 0);
     lv_label_set_text(lbl_t_tvoc, "TVOC --");
     lv_obj_align(lbl_t_tvoc, LV_ALIGN_BOTTOM_LEFT, 280, 8);
+#endif
 
     lbl_t_pressure = lv_label_create(th);
     lv_obj_set_style_text_color(lbl_t_pressure, lv_color_hex(COL_TEXT_DIM), 0);
@@ -3034,7 +3281,7 @@ lv_obj_t * screen_home_create(void) {
        milk carton for Plastic/PMD, leaf for GFT, trashcan fallback) so
        the user can read at a glance what's coming when. */
     tile_t waste_big;
-    make_tile(scr_root, 560, 20, 220, 200, LT_WASTE, "Waste", 0x88dd66,
+    make_tile(scr_root, 560, 20, 220, 200, LT_WASTE, tr("Afval", "Waste"), 0x88dd66,
               open_placeholder, &waste_big);
     tile_waste = waste_big.tile;
 
@@ -3086,9 +3333,10 @@ lv_obj_t * screen_home_create(void) {
        on the Heater bottom strip). Big live power on top, gas total below,
        today's kWh in the corner. */
     tile_t energy_t;
-    make_tile(scr_root, 790, 20, 214, 130, LT_ENERGY, "Energy", 0xaa77ff,
+    make_tile(scr_root, 790, 20, 214, 130, LT_ENERGY, tr("Energie", "Energy"), 0xaa77ff,
               open_stats, &energy_t);
     tile_energy = energy_t.tile;
+    slot_agenda[0] = make_slot_agenda(tile_energy, 0x4477cc);
     /* Compressed for the new 130-px tile: 28-pt W value (was 48), gas
      * total on the same baseline range below. */
     lbl_energy_w = lv_label_create(energy_t.tile);
@@ -3123,9 +3371,10 @@ lv_obj_t * screen_home_create(void) {
        % above and rpm below the fan. Tap on the fan itself opens the remote
        (the buttons get their own click handlers so they don't bubble). */
     tile_t vent;
-    make_tile(scr_root, 560, 230, 220, 200, LT_VENT, "Vent", 0x66bbdd,
+    make_tile(scr_root, 560, 230, 220, 200, LT_VENT, tr("Ventilatie", "Vent"), 0x66bbdd,
               (lv_event_cb_t)open_vent, &vent);
     tile_vent = vent.tile;
+    slot_agenda[2] = make_slot_agenda(tile_vent, 0x4477cc);
 
     /* Speed % shares the title row with the "Vent" label so the
        top-row buttons can sit cleanly below without overlap. */
@@ -3175,7 +3424,14 @@ lv_obj_t * screen_home_create(void) {
         lv_obj_t * bl = lv_label_create(b);
         lv_obj_set_style_text_color(bl, lv_color_hex(0xffffff), 0);
         lv_obj_set_style_text_font(bl, SF(14), 0);
-        lv_label_set_text(bl, btn[i].txt);
+        /* btn[i].txt stays the stable English key for the strcmp() ref
+         * matching below; only the visible label is translated. */
+        const char * disp = btn[i].txt;
+        if      (strcmp(disp, "Low")   == 0) disp = tr("Laag",  "Low");
+        else if (strcmp(disp, "High")  == 0) disp = tr("Hoog",  "High");
+        else if (strcmp(disp, "Auto")  == 0) disp = tr("Auto",  "Auto");
+        else if (strcmp(disp, "Timer") == 0) disp = tr("Timer", "Timer");
+        lv_label_set_text(bl, disp);
         lv_obj_center(bl);
         if (btn[i].cb == on_vent_timer) vent_timer_lbl = bl;
         /* Refs keyed by the visible label, not the cmd — the two are inverted
@@ -3200,9 +3456,10 @@ lv_obj_t * screen_home_create(void) {
     /* Family tile — Life360 locations for the two tracked people. Sits
      * between the shrunken Energy and Water tiles in the right column. */
     tile_t family_t;
-    make_tile(scr_root, 790, 160, 214, 130, LT_FAMILY, "Family", 0xff8866,
+    make_tile(scr_root, 790, 160, 214, 130, LT_FAMILY, tr("Familie", "Family"), 0xff8866,
               open_family_map, &family_t);
     tile_family = family_t.tile;
+    slot_agenda[1] = make_slot_agenda(tile_family, 0x4477cc);
     /* Two scrolling labels — the formatted address ("City > Street > Num")
      * almost always exceeds the 194-px tile width, so we use
      * SCROLL_CIRCULAR to slide the full string through the label area
@@ -3230,14 +3487,14 @@ lv_obj_t * screen_home_create(void) {
     lv_obj_align(lbl_life360_b, LV_ALIGN_TOP_LEFT, 0, 76);
 
     tile_t water_t;
-    make_tile(scr_root, 790, 300, 214, 130, LT_WATER, "Water", 0x44aaff, open_placeholder, &water_t);
+    make_tile(scr_root, 790, 300, 214, 130, LT_WATER, tr("Water", "Water"), 0x44aaff, open_placeholder, &water_t);
 
     /* Custom-layout-only tiles: a news-summary panel and a calendar/agenda tile.
      * Created only in custom layout mode (make_tile positions/hides them from
      * the grid); content is filled in refresh_cb. */
     if (settings.custom_layout_enabled) {
         tile_t nt, ct;
-        make_tile(scr_root, 0, 0, 200, 150, LT_NEWS_SUMMARY, "Nieuws", 0x6666aa, NULL, &nt);
+        make_tile(scr_root, 0, 0, 200, 150, LT_NEWS_SUMMARY, tr("Nieuws", "News"), 0x6666aa, NULL, &nt);
         tile_news_sum_lbl = lv_label_create(nt.tile);
         lv_obj_set_style_text_color(tile_news_sum_lbl, lv_color_hex(COL_TEXT_HI), 0);
         lv_obj_set_style_text_font(tile_news_sum_lbl, SF(14), 0);
@@ -3246,7 +3503,7 @@ lv_obj_t * screen_home_create(void) {
         lv_obj_align(tile_news_sum_lbl, LV_ALIGN_TOP_LEFT, 0, 38);
         lv_label_set_text(tile_news_sum_lbl, "...");
 
-        make_tile(scr_root, 0, 0, 200, 150, LT_CALENDAR, "Agenda", 0x4477cc, NULL, &ct);
+        make_tile(scr_root, 0, 0, 200, 150, LT_CALENDAR, tr("Agenda", "Calendar"), 0x4477cc, NULL, &ct);
         tile_cal_lbl = lv_label_create(ct.tile);
         lv_obj_set_style_text_color(tile_cal_lbl, lv_color_hex(COL_TEXT_HI), 0);
         lv_obj_set_style_text_font(tile_cal_lbl, SF(14), 0);
@@ -3258,14 +3515,15 @@ lv_obj_t * screen_home_create(void) {
         /* Lights: a placeable button tile that opens the lights screen (the same
          * backend as the retractable side handle). Hidden until added in the editor. */
         tile_t lt;
-        make_tile(scr_root, 0, 0, 200, 150, LT_LIGHTS, "Verlichting", 0xddaa44, on_lights_tile, &lt);
+        make_tile(scr_root, 0, 0, 200, 150, LT_LIGHTS, tr("Verlichting", "Lighting"), 0xddaa44, on_lights_tile, &lt);
         lv_obj_t * ll = lv_label_create(lt.tile);
         lv_obj_set_style_text_color(ll, lv_color_hex(COL_TEXT_HI), 0);
         lv_obj_set_style_text_font(ll, SF(28), 0);
-        lv_label_set_text(ll, "Lampen");
+        lv_label_set_text(ll, tr("Lampen", "Lights"));
         lv_obj_align(ll, LV_ALIGN_CENTER, 0, 6);
     }
     tile_water = water_t.tile;
+    slot_agenda[3] = make_slot_agenda(tile_water, 0x4477cc);
 
     /* Long-press on any of the four right-column tiles → tile-slots picker.
      * Same modal as Settings → Tiles. Cheap to attach; the handler only
@@ -3362,7 +3620,7 @@ lv_obj_t * screen_home_create(void) {
             p1_main[i] = lv_label_create(s.tile);
             lv_obj_set_style_text_color(p1_main[i], lv_color_hex(COL_TEXT_HI), 0);
             lv_obj_set_style_text_font(p1_main[i], vf, 0);
-            lv_label_set_text(p1_main[i], LV_SYMBOL_PLUS "  Tap to assign");
+            lv_label_set_text(p1_main[i], tr(LV_SYMBOL_PLUS "  Tik om te koppelen", LV_SYMBOL_PLUS "  Tap to assign"));
             if (horiz) {
                 lv_obj_align(p1_title[i], LV_ALIGN_LEFT_MID, 0, 0);   /* title left-of-centre */
                 lv_obj_align(p1_main[i],  LV_ALIGN_RIGHT_MID, -4, 0); /* value right, same line */
@@ -3390,70 +3648,19 @@ lv_obj_t * screen_home_create(void) {
     }
     home_show_page(0);
 
-    /* --- Curtains tile — slim strip below the (shrunk) thermostat tile.
-           Talks to Home Assistant via REST. Shows the group state +
-           battery; provides Open / Stop / Close buttons. --- */
-    lv_obj_t * curt_tile = lv_obj_create(scr_root);
-    tile_curtains = curt_tile;
-    lv_obj_set_size(curt_tile, 520, 44);
-    lv_obj_set_pos(curt_tile, 20, 386);
-    lv_obj_set_style_bg_color(curt_tile, lv_color_hex(COL_TILE_BG), 0);
-    lv_obj_set_style_border_width(curt_tile, 0, 0);
-    lv_obj_set_style_radius(curt_tile, 12, 0);
-    lv_obj_set_style_pad_all(curt_tile, 6, 0);
-    lv_obj_clear_flag(curt_tile, LV_OBJ_FLAG_SCROLLABLE);
-
-    /* Left strip: title + live state ("Gordijnen — open / 99%  bat 89%"). */
-    lbl_curtain_state = lv_label_create(curt_tile);
-    lv_obj_set_style_text_color(lbl_curtain_state, lv_color_hex(COL_TEXT_HI), 0);
-    lv_obj_set_style_text_font(lbl_curtain_state, SF(14), 0);
-    lv_label_set_text(lbl_curtain_state, "Gordijnen  --");
-    lv_obj_align(lbl_curtain_state, LV_ALIGN_TOP_LEFT, 8, 2);
-
-    /* Position bar 0..100 sits underneath the label so the user can see
-       at a glance how open the curtain is. Same teal as the existing
-       curtain-related elements. */
-    curt_bar = lv_bar_create(curt_tile);
-    lv_obj_set_size(curt_bar, 240, 6);
-    lv_obj_align(curt_bar, LV_ALIGN_BOTTOM_LEFT, 8, -4);
-    lv_bar_set_range(curt_bar, 0, 100);
-    lv_bar_set_value(curt_bar, 0, LV_ANIM_OFF);
-    lv_obj_set_style_bg_color(curt_bar, lv_color_hex(0x223344), LV_PART_MAIN);
-    lv_obj_set_style_bg_color(curt_bar, lv_color_hex(0x44aaff), LV_PART_INDICATOR);
-
-    /* Tiny spinner overlay — visible only while the curtain is mid-move.
-       lv_spinner is the same widget the water tile uses; it's an arc
-       that rotates continuously. */
-    curt_spinner = lv_spinner_create(curt_tile, 1200, 80);
-    lv_obj_set_size(curt_spinner, 28, 28);
-    lv_obj_align(curt_spinner, LV_ALIGN_LEFT_MID, 254, 0);
-    lv_obj_set_style_arc_color(curt_spinner, lv_color_hex(0x223344), LV_PART_MAIN);
-    lv_obj_set_style_arc_color(curt_spinner, lv_color_hex(0x44aaff),
-                               LV_PART_INDICATOR);
-    lv_obj_set_style_arc_width(curt_spinner, 4, LV_PART_MAIN);
-    lv_obj_set_style_arc_width(curt_spinner, 4, LV_PART_INDICATOR);
-    lv_obj_add_flag(curt_spinner, LV_OBJ_FLAG_HIDDEN);
-
-    /* Three buttons on the right: Open / Stop / Close. Narrower than the
-       default tile-button width so the label on the left has room for the
-       full state + battery readout. */
-    struct { const char * txt; uint32_t col; lv_event_cb_t cb; int x; } cbtn[] = {
-        { "Open",  0x2e6e3a, on_curt_open,  -156 },
-        { "Stop",  0x6a5424, on_curt_stop,   -82 },
-        { "Close", 0x6e3a3a, on_curt_close,   -8 },
-    };
-    for (size_t i = 0; i < sizeof(cbtn)/sizeof(cbtn[0]); i++) {
-        lv_obj_t * b = lv_btn_create(curt_tile);
-        lv_obj_set_size(b, 70, 32);
-        lv_obj_align(b, LV_ALIGN_RIGHT_MID, cbtn[i].x, 0);
-        lv_obj_set_style_bg_color(b, lv_color_hex(cbtn[i].col), 0);
-        lv_obj_set_style_radius(b, 8, 0);
-        lv_obj_add_event_cb(b, cbtn[i].cb, LV_EVENT_CLICKED, NULL);
-        lv_obj_t * bl = lv_label_create(b);
-        lv_obj_set_style_text_color(bl, lv_color_hex(0xffffff), 0);
-        lv_obj_set_style_text_font(bl, SF(14), 0);
-        lv_label_set_text(bl, cbtn[i].txt);
-        lv_obj_center(bl);
+    /* --- Pinned device quick-tiles — replaces the old fixed curtain/blinds
+           strips. Renders the devices flagged pin_home in the device manager
+           (Settings -> Devices), stacked below the thermostat tile. Only in
+           the default layout; the custom-layout grid uses its own tiles + the
+           LT_LIGHTS tile, so hardcoded strips would collide with the grid.
+           Moved to the foreground at the end of create() so they sit above
+           the later-built forecast strip. --- */
+    home_pin_count = 0;
+    if (!settings.custom_layout_enabled) {
+        int maxn = (DISP_VER >= 560) ? HOME_PIN_MAX : 2;
+        for (int i = 0; i < ha_device_count && home_pin_count < maxn; i++)
+            if (ha_devices[i].pin_home)
+                build_pin_tile(scr_root, i, home_pin_count);
     }
 
     /* City header above the forecast — labels the strip and shows the
@@ -3639,7 +3846,7 @@ lv_obj_t * screen_home_create(void) {
     update_banner_lbl = lv_label_create(update_banner);
     lv_obj_set_style_text_color(update_banner_lbl, lv_color_hex(0xffffff), 0);
     lv_obj_set_style_text_font(update_banner_lbl, SF(18), 0);
-    lv_label_set_text(update_banner_lbl, "Update available");
+    lv_label_set_text(update_banner_lbl, tr("Update beschikbaar", "Update available"));
     lv_obj_center(update_banner_lbl);
     lv_obj_add_flag(update_banner, LV_OBJ_FLAG_HIDDEN);
 
@@ -3717,24 +3924,37 @@ lv_obj_t * screen_home_create(void) {
      * Same target as the swipe-right gesture, but discoverable. */
     {
         lights_handle = lv_btn_create(scr_root);
-        lv_obj_set_size(lights_handle, 22, 64);
-        lv_obj_align(lights_handle, LV_ALIGN_LEFT_MID, -10, 0);
+        lv_obj_set_size(lights_handle, 56, 80);
+        lv_obj_align(lights_handle, LV_ALIGN_LEFT_MID, -4, 0);
         lv_obj_set_style_bg_color(lights_handle, lv_color_hex(0x2a4060), 0);
         lv_obj_set_style_bg_color(lights_handle, lv_color_hex(0x3a5688), LV_STATE_PRESSED);
         lv_obj_set_style_bg_opa(lights_handle, LV_OPA_70, 0);
         lv_obj_set_style_radius(lights_handle, LV_RADIUS_CIRCLE, 0);
         lv_obj_set_style_pad_all(lights_handle, 0, 0);
-        lv_obj_set_ext_click_area(lights_handle, 18);   /* easy to grab while slim */
+        lv_obj_set_ext_click_area(lights_handle, 24);   /* generous touch target */
         lv_obj_add_event_cb(lights_handle, on_lights_handle, LV_EVENT_PRESSED,    NULL);
         lv_obj_add_event_cb(lights_handle, on_lights_handle, LV_EVENT_RELEASED,   NULL);
         lv_obj_add_event_cb(lights_handle, on_lights_handle, LV_EVENT_PRESS_LOST, NULL);
         lv_obj_add_event_cb(lights_handle, on_lights_handle, LV_EVENT_CLICKED,    NULL);
         lights_handle_lbl = lv_label_create(lights_handle);
         lv_obj_set_style_text_color(lights_handle_lbl, lv_color_hex(0xffe08a), 0);
-        lv_obj_set_style_text_font(lights_handle_lbl, SF(22), 0);
-        lv_label_set_text(lights_handle_lbl, LV_SYMBOL_CHARGE " Lights");
+        lv_obj_set_style_text_font(lights_handle_lbl, SF(28), 0);
+        lv_label_set_text(lights_handle_lbl, LV_SYMBOL_CHARGE);
         lv_obj_center(lights_handle_lbl);
-        lv_obj_add_flag(lights_handle_lbl, LV_OBJ_FLAG_HIDDEN);   /* shown only while expanded */
+
+        /* Collapsed handle shows the active backend's logo: Domoticz if that's
+         * configured (matches open_lights_backend's priority), else HA. The
+         * charge glyph stays as the fallback when neither is enabled. */
+        const lv_img_dsc_t * logo = settings.enable_domoticz ? &icon_domoticz
+                                  : settings.enable_ha       ? &icon_ha
+                                  : NULL;
+        if (logo) {
+            lights_handle_img = lv_img_create(lights_handle);
+            lv_img_set_src(lights_handle_img, logo);
+            lv_img_set_zoom(lights_handle_img, 224);   /* 48px -> ~42px */
+            lv_obj_center(lights_handle_img);
+            lv_obj_add_flag(lights_handle_lbl, LV_OBJ_FLAG_HIDDEN);
+        }
     }
 
     /* Gear in the very top-right corner of the screen. */
@@ -3750,6 +3970,11 @@ lv_obj_t * screen_home_create(void) {
     lv_obj_set_style_text_color(gear_lbl, lv_color_hex(0xffffff), 0);
     lv_obj_set_style_text_font(gear_lbl, SF(18), 0);
     lv_obj_center(gear_lbl);
+
+    /* Pinned device tiles were built before the forecast strip, so raise them
+     * above it now that every tile exists. */
+    for (int p = 0; p < home_pin_count; p++)
+        if (home_pins[p].tile) lv_obj_move_foreground(home_pins[p].tile);
 
     if (!refresh_timer) refresh_timer = lv_timer_create(refresh_cb, 500, NULL);
     return scr_root;

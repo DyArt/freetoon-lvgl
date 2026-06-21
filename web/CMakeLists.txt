@@ -16,6 +16,24 @@
 cmake_minimum_required(VERSION 3.16)
 project(freetoon_wasm C)
 
+# Derive the build version from git (mirrors the device Makefile) instead of a
+# hardcoded literal, which used to leave the WASM bundle stamped at an old
+# version regardless of the actual release.
+# Allow an explicit override (-DFT_BUILD_VERSION=...), mirroring the device
+# Makefile's `make BUILD_VERSION=...`. Needed because the lvgl submodule carries
+# a build-applied patch (the no-GCT radar fix), which makes `describe --dirty`
+# always report -dirty; the release passes the clean tag instead.
+if(NOT FT_BUILD_VERSION)
+    execute_process(
+        COMMAND git -C ${CMAKE_CURRENT_LIST_DIR} describe --tags --always --dirty
+        OUTPUT_VARIABLE FT_BUILD_VERSION OUTPUT_STRIP_TRAILING_WHITESPACE
+        ERROR_QUIET)
+endif()
+if(NOT FT_BUILD_VERSION)
+    set(FT_BUILD_VERSION "dev")
+endif()
+message(STATUS "freetoon WASM BUILD_VERSION = ${FT_BUILD_VERSION}")
+
 if(NOT EMSCRIPTEN)
     message(FATAL_ERROR "This CMakeLists.txt only builds under Emscripten. "
                         "Invoke via `emcmake cmake .. && emmake make`.")
@@ -64,6 +82,10 @@ list(REMOVE_ITEM FT_SOURCES
     ${FREETOON}/toon1_touch.c   # Toon-1 evdev touch (linux/input.h); active only
                                 # under -DTOON1, and the WASM uses SDL input —
                                 # called only by main.c/bootpick.c (also excluded)
+    ${FREETOON}/fbdev.c         # /dev/fb0 + linux/fb.h (Toon framebuffer driver)
+    ${FREETOON}/video.c         # Toon-1 i.MX27 VPU pipeline (depends on fbdev cutout)
+    ${FREETOON}/doorbell_daemon.c  # standalone daemon, own main()
+    ${FREETOON}/glibc_compat_wrap.c # Toon-1 glibc-2.21 --wrap shim (linker-wrap only)
 )
 
 # ---- LVGL ---------------------------------------------------------------------
@@ -106,7 +128,7 @@ target_compile_definitions(index PRIVATE
     SDL_VER_RES=${PANEL_VER}
     $<$<BOOL:${TOON1}>:TOON1>
     WASM_BUILD
-    BUILD_VERSION="v0.9.34")
+    BUILD_VERSION="${FT_BUILD_VERSION}")
 
 target_compile_options(index PRIVATE
     -O2

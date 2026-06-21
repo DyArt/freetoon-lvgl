@@ -20,6 +20,9 @@ settings_t settings = {
     .show_dim_weather  = 1,
     .show_dim_waste    = 1,
     .show_dim_bars     = 1,
+    .show_dim_metrics  = 1,
+    .dim_custom_enabled = 0,
+    .language          = 0,   /* LANG_NL */
     .dim_bars_swap     = 0,
     .dim_waste_lead_days = 3,
     .vnc_enabled       = 0,
@@ -72,6 +75,11 @@ settings_t settings = {
     .news_rss_url        = "https://feeds.nos.nl/nosnieuwsalgemeen",
     .news_scroll_speed   = 30,
     .calendar_enabled    = 0,
+    .calendar_notify_enabled  = 0,
+    .calendar_notify_lead_min = 15,
+    .home_theme               = 0,
+    .stock_tiles              = "",
+    .stock_big_indoor         = 1,
     .calendar_ha_entity  = "",
     .calendar_ics_url    = "",
     .custom_layout_enabled = 0,
@@ -85,10 +93,21 @@ settings_t settings = {
     .curtain_entity      = "",
     .curtain_bat_a       = "",
     .curtain_bat_b       = "",
+    .blinds_entity       = "",
+    .blinds_bat_a        = "",
+    .blinds_bat_b        = "",
     .doorbell_entity     = "",
     .doorbell_camera     = "",
     .doorbell_seconds    = 30,
     .doorbell_stream_url = "",
+    .video_enabled       = 1,
+    .video_size_pct      = 50,
+    .video_src_w         = 640,
+    .video_src_h         = 480,
+    .video_x             = -1,
+    .video_y             = -1,
+    .video_rtp           = 0,
+    .video_overlay       = 0,
     .p1_elec_host        = "",
     .p1_water_host       = "",
     .vent_host           = "",
@@ -174,6 +193,9 @@ void settings_load(void) {
         else if (strcmp(k, "show_dim_weather")  == 0) settings.show_dim_weather  = iv;
         else if (strcmp(k, "show_dim_waste")    == 0) settings.show_dim_waste    = iv;
         else if (strcmp(k, "show_dim_bars")     == 0) settings.show_dim_bars     = iv;
+        else if (strcmp(k, "dim_custom_enabled") == 0) settings.dim_custom_enabled = iv;
+        else if (strcmp(k, "show_dim_metrics")  == 0) settings.show_dim_metrics  = iv;
+        else if (strcmp(k, "language")          == 0) settings.language          = iv;
         else if (strcmp(k, "dim_bars_swap")     == 0) settings.dim_bars_swap     = iv;
         else if (strcmp(k, "dim_waste_lead_days") == 0) settings.dim_waste_lead_days = iv;
         else if (strcmp(k, "waste_postcode")    == 0)
@@ -262,6 +284,11 @@ void settings_load(void) {
         }
         else if (strcmp(k, "news_scroll_speed") == 0) settings.news_scroll_speed = (iv > 0 && iv < 30) ? 30 : (iv > 150 ? 150 : iv);
         else if (strcmp(k, "calendar_enabled")   == 0) settings.calendar_enabled = iv;
+        else if (strcmp(k, "calendar_notify_enabled")  == 0) settings.calendar_notify_enabled = iv;
+        else if (strcmp(k, "calendar_notify_lead_min") == 0) settings.calendar_notify_lead_min = iv;
+        else if (strcmp(k, "home_theme")         == 0) settings.home_theme = iv;
+        else if (strcmp(k, "stock_tiles")        == 0) snprintf(settings.stock_tiles, sizeof settings.stock_tiles, "%s", v);
+        else if (strcmp(k, "stock_big_indoor")   == 0) settings.stock_big_indoor = iv;
         else if (strcmp(k, "calendar_ha_entity") == 0) snprintf(settings.calendar_ha_entity, sizeof settings.calendar_ha_entity, "%s", v);
         else if (strcmp(k, "calendar_ics_url")   == 0) snprintf(settings.calendar_ics_url, sizeof settings.calendar_ics_url, "%s", v);
         else if (strcmp(k, "custom_layout_enabled") == 0) settings.custom_layout_enabled = iv;
@@ -276,9 +303,20 @@ void settings_load(void) {
         else if (strcmp(k, "curtain_entity")   == 0) snprintf(settings.curtain_entity, sizeof settings.curtain_entity, "%s", v);
         else if (strcmp(k, "curtain_bat_a")    == 0) snprintf(settings.curtain_bat_a, sizeof settings.curtain_bat_a, "%s", v);
         else if (strcmp(k, "curtain_bat_b")    == 0) snprintf(settings.curtain_bat_b, sizeof settings.curtain_bat_b, "%s", v);
+        else if (strcmp(k, "blinds_entity")    == 0) snprintf(settings.blinds_entity, sizeof settings.blinds_entity, "%s", v);
+        else if (strcmp(k, "blinds_bat_a")     == 0) snprintf(settings.blinds_bat_a, sizeof settings.blinds_bat_a, "%s", v);
+        else if (strcmp(k, "blinds_bat_b")     == 0) snprintf(settings.blinds_bat_b, sizeof settings.blinds_bat_b, "%s", v);
         else if (strcmp(k, "doorbell_entity")  == 0) snprintf(settings.doorbell_entity, sizeof settings.doorbell_entity, "%s", v);
         else if (strcmp(k, "doorbell_camera")  == 0) snprintf(settings.doorbell_camera, sizeof settings.doorbell_camera, "%s", v);
         else if (strcmp(k, "doorbell_seconds") == 0) settings.doorbell_seconds = (iv < 3 || iv > 300) ? 30 : iv;
+        else if (strcmp(k, "video_enabled")    == 0 || strcmp(k, "camera_enabled")  == 0) settings.video_enabled = (iv ? 1 : 0);
+        else if (strcmp(k, "video_size_pct")   == 0 || strcmp(k, "camera_size_pct") == 0) settings.video_size_pct = (iv < 25 || iv > 125) ? 100 : iv;
+        else if (strcmp(k, "video_src_w")      == 0 || strcmp(k, "camera_src_w")    == 0) settings.video_src_w = (iv < 64 || iv > 1920) ? 640 : iv;
+        else if (strcmp(k, "video_src_h")      == 0 || strcmp(k, "camera_src_h")    == 0) settings.video_src_h = (iv < 64 || iv > 1080) ? 480 : iv;
+        else if (strcmp(k, "video_x")          == 0 || strcmp(k, "camera_x")        == 0) settings.video_x = iv;
+        else if (strcmp(k, "video_y")          == 0 || strcmp(k, "camera_y")        == 0) settings.video_y = iv;
+        else if (strcmp(k, "video_rtp")        == 0 || strcmp(k, "camera_rtp")      == 0) settings.video_rtp = (iv < 0 || iv > 65535) ? 0 : iv;
+        else if (strcmp(k, "video_overlay")    == 0 || strcmp(k, "camera_overlay")  == 0) settings.video_overlay = (iv ? 1 : 0);
         else if (strcmp(k, "doorbell_stream_url") == 0) snprintf(settings.doorbell_stream_url, sizeof settings.doorbell_stream_url, "%s", v);
         else if (strcmp(k, "p1_elec_host")     == 0) snprintf(settings.p1_elec_host, sizeof settings.p1_elec_host, "%s", v);
         else if (strcmp(k, "p1_water_host")    == 0) snprintf(settings.p1_water_host, sizeof settings.p1_water_host, "%s", v);
@@ -413,7 +451,8 @@ static void sanitize_all_strings(void) {
         settings.mqtt_pass, settings.domoticz_host, settings.master_host,
         settings.tile_rotate_members, settings.calendar_ha_entity,
         settings.calendar_ics_url, settings.ha_host, settings.curtain_entity,
-        settings.curtain_bat_a, settings.curtain_bat_b, settings.doorbell_entity,
+        settings.curtain_bat_a, settings.curtain_bat_b, settings.blinds_entity,
+        settings.blinds_bat_a, settings.blinds_bat_b, settings.doorbell_entity,
         settings.doorbell_camera, settings.doorbell_stream_url, settings.vent_host,
         settings.opnsense_host, settings.domoticz_user, settings.domoticz_pass,
         settings.tile_slot_energy, settings.tile_slot_family, settings.tile_slot_vent,
@@ -510,6 +549,9 @@ void settings_save(void) {
     fprintf(f, "show_dim_weather=%d\n",  settings.show_dim_weather);
     fprintf(f, "show_dim_waste=%d\n",    settings.show_dim_waste);
     fprintf(f, "show_dim_bars=%d\n",     settings.show_dim_bars);
+    fprintf(f, "dim_custom_enabled=%d\n", settings.dim_custom_enabled);
+    fprintf(f, "show_dim_metrics=%d\n",  settings.show_dim_metrics);
+    fprintf(f, "language=%d\n",           settings.language);
     fprintf(f, "dim_bars_swap=%d\n",     settings.dim_bars_swap);
     fprintf(f, "dim_waste_lead_days=%d\n", settings.dim_waste_lead_days);
     fprintf(f, "waste_postcode=%s\n",      settings.waste_postcode);
@@ -561,6 +603,11 @@ void settings_save(void) {
         fprintf(f, "news_rss_url=%s\n", news_enc);
     }
     fprintf(f, "calendar_enabled=%d\n", settings.calendar_enabled);
+    fprintf(f, "calendar_notify_enabled=%d\n", settings.calendar_notify_enabled);
+    fprintf(f, "home_theme=%d\n", settings.home_theme);
+    if (settings.stock_tiles[0]) fprintf(f, "stock_tiles=%s\n", settings.stock_tiles);
+    fprintf(f, "stock_big_indoor=%d\n", settings.stock_big_indoor);
+    fprintf(f, "calendar_notify_lead_min=%d\n", settings.calendar_notify_lead_min);
     fprintf(f, "calendar_ha_entity=%s\n", settings.calendar_ha_entity);
     fprintf(f, "calendar_ics_url=%s\n", settings.calendar_ics_url);
     fprintf(f, "custom_layout_enabled=%d\n", settings.custom_layout_enabled);
@@ -576,9 +623,20 @@ void settings_save(void) {
     fprintf(f, "curtain_entity=%s\n", settings.curtain_entity);
     fprintf(f, "curtain_bat_a=%s\n", settings.curtain_bat_a);
     fprintf(f, "curtain_bat_b=%s\n", settings.curtain_bat_b);
+    fprintf(f, "blinds_entity=%s\n", settings.blinds_entity);
+    fprintf(f, "blinds_bat_a=%s\n",  settings.blinds_bat_a);
+    fprintf(f, "blinds_bat_b=%s\n",  settings.blinds_bat_b);
     fprintf(f, "doorbell_entity=%s\n", settings.doorbell_entity);
     fprintf(f, "doorbell_camera=%s\n", settings.doorbell_camera);
     fprintf(f, "doorbell_seconds=%d\n", settings.doorbell_seconds);
+    fprintf(f, "video_enabled=%d\n",   settings.video_enabled);
+    fprintf(f, "video_size_pct=%d\n",  settings.video_size_pct);
+    fprintf(f, "video_src_w=%d\n",     settings.video_src_w);
+    fprintf(f, "video_src_h=%d\n",     settings.video_src_h);
+    fprintf(f, "video_x=%d\n",         settings.video_x);
+    fprintf(f, "video_y=%d\n",         settings.video_y);
+    fprintf(f, "video_rtp=%d\n",       settings.video_rtp);
+    fprintf(f, "video_overlay=%d\n",   settings.video_overlay);
     fprintf(f, "doorbell_stream_url=%s\n", settings.doorbell_stream_url);
     fprintf(f, "p1_elec_host=%s\n", settings.p1_elec_host);
     fprintf(f, "p1_water_host=%s\n", settings.p1_water_host);

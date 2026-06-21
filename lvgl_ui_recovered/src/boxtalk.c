@@ -10,6 +10,7 @@
  * just hunt for attribute values and child-element text via strstr.
  */
 #include "boxtalk.h"
+#include "i18n.h"
 #include "inbox.h"
 #include "schedule.h"
 #include "settings.h"
@@ -90,23 +91,16 @@ const char* program_label(void) {
      * UI surfaces it as "Scheduled: Home" so the *mode* (manual vs. on the
      * schedule) is one tap away from being obvious. Returns a pointer into
      * a static buffer; safe because LVGL copies labels on set_text. */
-    /* Short label suitable for ambient/dim use: just the active preset
-     * name, or "Manual" when off the schedule. The home tile renders
-     * the override-aware "(temp)" hint via its own logic next to the
-     * mode-toggle button instead of bolting it onto this label. */
-    int origin = -1;
-    if (temp_override_active && temp_override_origin >= 0 &&
-                                temp_override_origin <= 3)
-        origin = temp_override_origin;
-    int preset_idx = (toon_state.active_state >= 0)
-                         ? toon_state.program_state : origin;
-    if (preset_idx < 0) return "Manual";
-    switch (preset_idx) {
-        case 0: return "Comfort";
-        case 1: return "Home";
-        case 2: return "Sleep";
-        case 3: return "Away";
-        default: return "Scheduled";
+    /* Dim/ambient label = the active preset name (stock getStateName(activeState)),
+     * which the stock UI surfaces regardless of mode; "Manual" only when there is
+     * no active preset (activeState == -1). The mode itself (Manual vs Program) is
+     * the home tile's toggle, not this label. */
+    switch (toon_state.active_state) {
+        case 0: return tr("Comfort", "Comfort");
+        case 1: return tr("Thuis", "Home");
+        case 2: return tr("Slapen", "Sleep");
+        case 3: return tr("Weg", "Away");
+        default: return tr("Handmatig", "Manual");
     }
 }
 
@@ -129,7 +123,12 @@ static char THERMD_UUID[96]   = "qb-000000000000-0000000000:happ_thermstat";
 
 static void bt_init_dev_uuids(void) {
     char hn[64] = {0};
-    if (gethostname(hn, sizeof hn - 1) == 0 && strncmp(hn, "qb-", 3) == 0)
+    /* Accept both "qb-..." (Toon 2 / nxt) and "eneco-..." (Toon 1 / qb2)
+     * hostnames as the BoxTalk UUID prefix -- without the eneco- case a
+     * Toon 1 keeps the dummy serial and every subscription (incl. the
+     * indoor-temperature dataset) silently fails. */
+    if (gethostname(hn, sizeof hn - 1) == 0 &&
+        (strncmp(hn, "qb-", 3) == 0 || strncmp(hn, "eneco-", 6) == 0))
         snprintf(dev_base, sizeof dev_base, "%s", hn);
     snprintf(OUR_UUID,     sizeof OUR_UUID,     "%s:toonui",      dev_base);
     snprintf(ZWAVE_UUID,   sizeof ZWAVE_UUID,   "%s:hdrv_zwave",  dev_base);
@@ -219,6 +218,15 @@ static int elem_text_float(const char* xml, const char* elem, float* out) {
 #define UUID_THERMSTAT  "b822de89-ecbd-4f6f-9fd2-5cac18fc06c4"
 #define UUID_BOILER     "6ecc08b0-1e18-42d5-9725-46db009d1a00"
 
+/* The happ_thermstat ThermostatInfo *publisher* uuid is DYNAMIC (regenerated each
+ * happ start, e.g. e7b8a710-… / 4eb79be8-…) — NOT the hardcoded THERMSTAT_UUID we
+ * use as a query destination. BoilerChPressure only arrives via a rare change-notify,
+ * and the startup query to the stale hardcoded uuid never answers, so the pressure
+ * tile sits at "-- bar" until a notify happens to fire. Learn the live uuid here and
+ * re-query the pressure against it until it's seeded. */
+static char g_therm_pub[64] = {0};
+static int send_query(const char* destuuid, const char* service, const char* state_var);
+
 static void handle_notify(const char* xml) {
     char sid[128];
     if (!attr_value(xml, "serviceid", sid, sizeof(sid))) return;
@@ -263,6 +271,17 @@ static void handle_notify(const char* xml) {
         }
     } else if (strcmp(tail, "ThermostatInfo") == 0) {
         float v;
+        /* Learn the live (dynamic) thermostat publisher uuid, and while the CH
+         * pressure is still unseeded, re-query it against THIS uuid — the stale
+         * hardcoded startup query never answers. Capped so we don't query forever. */
+        if (src_uuid[0]) {
+            snprintf(g_therm_pub, sizeof g_therm_pub, "%s", src_uuid);
+            static int seed_tries = 0;
+            if (toon_state.water_pressure <= 0.05f && seed_tries < 10) {
+                seed_tries++;
+                send_query(g_therm_pub, "ThermostatInfo", "BoilerChPressure");
+            }
+        }
         /* Indoor room temperature — happ_thermstat (UUID_THERMSTAT) pushes
          * this on every measurable change. Was being silently dropped on
          * this notify path; without it the dim/home screens fell back to
@@ -1073,61 +1092,101 @@ int boxtalk_set_state_value(int state, int centi) {
     return rc;
 }
 
-int boxtalk_set_program(int state) {
-    if (state < 0 || state > 3) return -1;
+/* happ_thermstat scheme MODES — the `state=` parameter of changeSchemeState.
+ * Reverse-engineered from Eneco's own stock UI (/qmf/www/mobile/javascript/
+ * mobile.js, setProgramState/changeSchemeState). This is the scheme MODE, NOT
+ * the comfort preset: changeSchemeState takes BOTH `state=<mode>` AND
+ * `temperatureState=<preset 0..3>`. Verified live on a Toon 2: only with both
+ * params does the preset's setpoint actually apply (Comfort 1950 / Home 1850 /
+ * Sleep 1750 / Away 1600). The old code sent only `state=<presetIndex>`, which
+ * jammed the preset into the mode field — so presets 2/3 silently no-op'd and
+ * the setpoint never followed. */
+#define PROG_MANUAL        0   /* manual hold, no schedule */
+#define PROG_BASE          1   /* follow the weekly program */
+#define PROG_TEMPOVERRIDE  2   /* override to a preset until the next switch */
+#define PROG_LOCKEDBASE    8   /* override held indefinitely (2nd tap of preset) */
+
+int boxtalk_set_program(int preset) {
+    if (preset < 0 || preset > 3) return -1;   /* preset = comfort level 0..3 */
 #ifdef WASM_BUILD
-    /* WASM client: POST /api/program via the JS fetch bridge. */
+    /* WASM client: POST the preset to the master, which runs the mode logic. */
     extern void wasm_push_event(const char *, const char *);
     char body[24];
-    snprintf(body, sizeof body, "{\"state\":%d}", state);
+    snprintf(body, sizeof body, "{\"state\":%d}", preset);
     wasm_push_event("/api/program", body);
-    toon_state.program_state = state; toon_state.active_state = state;
+    toon_state.active_state = preset;   /* activeState = the live comfort preset */
     return 0;
 #endif
-    if (settings.client_mode) {      /* slave: hand the program change to the master */
-        int rc = client_link_program(state);
-        if (rc == 0) { toon_state.program_state = state; toon_state.active_state = state; }
+    if (settings.client_mode) {      /* slave: hand the preset to the master */
+        int rc = client_link_program(preset);
+        if (rc == 0) toon_state.active_state = preset;
         return rc;
     }
-    char q[64];
-    snprintf(q, sizeof(q), "action=changeSchemeState&state=%d", state);
+    /* Mirror the stock UI's setProgramState() VERBATIM (Toon mobile.js, the HCB
+     * web app — the authoritative reference):
+     *   if  programState == LOCKEDBASE -> TEMPOVERRIDE   (a new choice unlocks)
+     *   elif programState == MANUAL    -> MANUAL         (stay manual; only the
+     *                                     temperatureState/setpoint changes)
+     *   elif activeState  == preset    -> LOCKEDBASE     (2nd tap of same = lock)
+     *   else                           -> TEMPOVERRIDE   (override until next switch) */
+    int mode;
+    if      (toon_state.program_state == PROG_LOCKEDBASE) mode = PROG_TEMPOVERRIDE;
+    else if (toon_state.program_state == PROG_MANUAL)     mode = PROG_MANUAL;
+    else if (toon_state.active_state  == preset)          mode = PROG_LOCKEDBASE;
+    else                                                  mode = PROG_TEMPOVERRIDE;
+
+    char q[80];
+    snprintf(q, sizeof(q),
+             "action=changeSchemeState&state=%d&temperatureState=%d", mode, preset);
     int rc = http_get_thermstat(q);
-    fprintf(stderr, "[bxt] HTTP changeSchemeState=%d rc=%d\n", state, rc);
-    /* Optimistic: we'll see authoritative state on next poll. */
+    fprintf(stderr, "[bxt] changeSchemeState mode=%d temperatureState=%d rc=%d\n",
+            mode, preset, rc);
+    /* Optimistic: reflect both the preset AND the new mode at once so the
+     * highlight/program-toggle update immediately, before the next poll. */
     if (rc == 0) {
-        toon_state.program_state = state;
-        toon_state.active_state  = state;
+        toon_state.active_state  = preset;
+        toon_state.program_state = mode;
     }
     return rc;
 }
 
 int boxtalk_set_manual(void) {
-    /* "Manual" in the UI: leave the schedule and hold the setpoint
-     * indefinitely. happ_thermstat only flips activeState to -1 when
-     * roomSetpoint writes a *different* value than the current one — a
-     * same-value write returns "ok" and silently no-ops, so tapping
-     * Manual right after Program (which had already pinned the setpoint
-     * to the preset's stored value) used to leave the device on the
-     * schedule. Nudge by 1 centi-°C (0.01 °C, below display resolution)
-     * to guarantee the write engages manual. */
+    /* "Manual": leave the schedule and hold indefinitely (programState=0).
+     * Verified on a Toon 2: a bare roomSetpoint write makes a TEMP override
+     * (programState=2, reverts at the next schedule switch), NOT a manual hold.
+     * The canonical manual is changeSchemeState&state=0. temperatureState holds
+     * the preset whose stored temp the user is already on (≈ current setpoint);
+     * happ jumps the setpoint to it. */
     temp_override_active = 0;
-    float sp = toon_state.setpoint > 0 ? toon_state.setpoint : 18.0f;
-    int centi = (int)(sp * 100.0f + 0.5f);
-    centi += (centi < 3000) ? 1 : -1;     /* +0.01 °C unless we're at the cap */
-    int rc = boxtalk_set_setpoint(centi / 100.0f);
-    if (rc == 0) toon_state.active_state = -1;
+    int ts = (toon_state.active_state >= 0 && toon_state.active_state <= 3)
+                 ? toon_state.active_state : 1;
+    char q[80];
+    snprintf(q, sizeof(q),
+             "action=changeSchemeState&state=%d&temperatureState=%d", PROG_MANUAL, ts);
+    int rc = http_get_thermstat(q);
+    fprintf(stderr, "[bxt] set_manual changeSchemeState state=0 ts=%d rc=%d\n", ts, rc);
+    if (rc == 0) {
+        toon_state.program_state = PROG_MANUAL;   /* 0, optimistic */
+        toon_state.active_state  = -1;            /* not on a preset */
+    }
     return rc;
 }
 
 int boxtalk_resume_schedule(void) {
-    /* "Follow the schedule again." happ_thermstat doesn't have a verb
-     * for "resume schedule" — instead we ask for the preset the schedule
-     * says is currently active, which puts activeState back ≥0 and lets
-     * the schedule daemon progress normally from there. */
+    /* "Program/Auto": resume the weekly schedule (programState=1, PROG_BASE).
+     * Verified on a Toon 2: state=1 repopulates nextProgram/nextState/nextTime
+     * and activeState from the schedule. set_program would instead pick an
+     * override mode (2/8), so send PROG_BASE directly. */
     temp_override_active = 0;
     int now_state = schedule_program_now();
-    if (now_state < 0) now_state = 1;     /* fall back to Home if no schedule */
-    return boxtalk_set_program(now_state);
+    if (now_state < 0) now_state = 1;     /* fall back to Home if the schedule is unknown */
+    char q[80];
+    snprintf(q, sizeof(q),
+             "action=changeSchemeState&state=%d&temperatureState=%d", PROG_BASE, now_state);
+    int rc = http_get_thermstat(q);
+    fprintf(stderr, "[bxt] resume_schedule changeSchemeState state=1 ts=%d rc=%d\n", now_state, rc);
+    if (rc == 0) toon_state.program_state = PROG_BASE;   /* 1, optimistic */
+    return rc;
 }
 
 /* +/- on the home tile = temporary override that auto-reverts to the

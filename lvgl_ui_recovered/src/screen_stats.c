@@ -11,6 +11,7 @@
  */
 #include "screens.h"
 #include "display.h"
+#include "i18n.h"
 #include "stats.h"
 #include "airhist.h"
 #include "homewizard.h"
@@ -119,10 +120,15 @@ static int load_for_period(void) {
     if (m->local_hist) {                /* CO2/TVOC/pressure — freetoon's recorder */
         series2.n = 0;
         if (m->local_hist == 2) {       /* CH pressure — hourly ring, all periods */
-            long win = (selected_period == PERIOD_HOUR)  ? HOUR
-                     : (selected_period == PERIOD_DAY)   ? DAY
-                     : (selected_period == PERIOD_WEEK)  ? WEEK
-                     : (selected_period == PERIOD_MONTH) ? MONTH : YEAR;
+            /* CH pressure is sampled only ONCE PER HOUR, so a 1-hour window
+             * holds <=1 point and the graph looks empty (the default Hour tab).
+             * Pressure is a slow-moving signal, so widen each period one step:
+             * the buttons select recent->longest trend instead of literal spans.
+             * Hour -> day of data, Day -> week, etc. so no tab is ever empty. */
+            long win = (selected_period == PERIOD_HOUR)  ? DAY
+                     : (selected_period == PERIOD_DAY)   ? WEEK
+                     : (selected_period == PERIOD_WEEK)  ? MONTH
+                     : (selected_period == PERIOD_MONTH) ? YEAR : YEAR;
             return airhist_pres_series(win, 365, &series);
         }
         long win = (selected_period == PERIOD_HOUR) ? HOUR
@@ -321,7 +327,7 @@ static void render_chart(void) {
     /* Caption + headline value. */
     const metric_t * m = &metrics[selected_metric];
     if (!is_cum) {
-        lv_label_set_text(lbl_unit, "Current");
+        lv_label_set_text(lbl_unit, tr("Huidig", "Current"));
         double cur = NAN;
         if (selected_metric == 0)      cur = hw_state.power_w;
         else if (selected_metric == 2) cur = hw_state.water_lpm;
@@ -329,12 +335,12 @@ static void render_chart(void) {
             for (int i = series.n - 1; i >= 0; i--)
                 if (!isnan(series.samples[i])) { cur = series.samples[i]; break; }
         }
-        if (isnan(cur)) lv_label_set_text(lbl_value, "--");
+        if (isnan(cur)) lv_label_set_text(lbl_value, "--");   /* symbol-only, not translated */
         else lv_label_set_text_fmt(lbl_value, "%.1f %s", cur, m->unit_flow);
     } else {
-        lv_label_set_text(lbl_unit, "Period total");
+        lv_label_set_text(lbl_unit, tr("Periodetotaal", "Period total"));
         if (g_bar_count == 0) {
-            lv_label_set_text(lbl_value, "no data");
+            lv_label_set_text(lbl_value, tr("geen data", "no data"));
         } else {
             double total = 0;   /* g_bar_val already in kWh/m3 for cumulative */
             for (int i = 0; i < g_bar_count; i++) total += g_bar_val[i];
@@ -381,7 +387,7 @@ lv_obj_t * screen_stats_create(void) {
     lv_obj_set_ext_click_area(back, 20);
     lv_obj_add_event_cb(back, on_back, LV_EVENT_CLICKED, NULL);
     lv_obj_t * bl = lv_label_create(back);
-    lv_label_set_text(bl, "< Back");
+    lv_label_set_text(bl, tr("< Terug", "< Back"));
     lv_obj_set_style_text_color(bl, lv_color_hex(0xffffff), 0);
     lv_obj_set_style_text_font(bl, SF(22), 0);
     lv_obj_center(bl);
@@ -389,7 +395,7 @@ lv_obj_t * screen_stats_create(void) {
     lv_obj_t * title = lv_label_create(scr_root);
     lv_obj_set_style_text_color(title, lv_color_hex(0xffffff), 0);
     lv_obj_set_style_text_font(title, SF(28), 0);
-    lv_label_set_text(title, "Statistics");
+    lv_label_set_text(title, tr("Statistieken", "Statistics"));
     lv_obj_align(title, LV_ALIGN_TOP_LEFT, 180, 26);
 
     /* Metric tabs row */
@@ -412,7 +418,8 @@ lv_obj_t * screen_stats_create(void) {
     }
 
     /* Period tabs row */
-    const char * periods[] = {"Hour", "Day", "Week", "Month", "Year"};
+    const char * periods[] = {tr("Uur", "Hour"), tr("Dag", "Day"), tr("Week", "Week"),
+                              tr("Maand", "Month"), tr("Jaar", "Year")};
     for (int i = 0; i < 5; i++) {
         lv_obj_t * t = lv_obj_create(scr_root);
         lv_obj_set_size(t, SX(184), SY(46));
@@ -435,7 +442,7 @@ lv_obj_t * screen_stats_create(void) {
     lbl_metric_name = lv_label_create(scr_root);
     lv_obj_set_style_text_color(lbl_metric_name, lv_color_hex(0x88aabb), 0);
     lv_obj_set_style_text_font(lbl_metric_name, SF(22), 0);
-    lv_label_set_text(lbl_metric_name, "Electricity");
+    lv_label_set_text(lbl_metric_name, tr("Elektriciteit", "Electricity"));
     lv_obj_align(lbl_metric_name, LV_ALIGN_TOP_LEFT, 30, SY(235));
 
     /* Repurposed as the "Current" / "Period total" caption above the
@@ -443,7 +450,7 @@ lv_obj_t * screen_stats_create(void) {
     lbl_unit = lv_label_create(scr_root);
     lv_obj_set_style_text_color(lbl_unit, lv_color_hex(0x88aabb), 0);
     lv_obj_set_style_text_font(lbl_unit, SF(18), 0);
-    lv_label_set_text(lbl_unit, "Current");
+    lv_label_set_text(lbl_unit, tr("Huidig", "Current"));
     lv_obj_align(lbl_unit, LV_ALIGN_TOP_LEFT, 30, SY(265));
 
     lbl_value = lv_label_create(scr_root);

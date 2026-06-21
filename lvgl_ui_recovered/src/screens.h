@@ -9,9 +9,18 @@
 
 void ui_push(lv_obj_t * scr);
 void ui_pop(void);
+/* Apply settings.home_theme live (swap dark<->stock home, no restart). */
+void ui_apply_home_theme(void);
+void ui_request_restart(void);   /* clean _exit(0) restart; drops the launcher crash-guard marker */
+
+/* Start a gentle ~1.1s opacity pulse on a clock-colon overlay label so the ":"
+ * blinks like a real clock. Call once after creating the colon label. */
+void clock_colon_pulse(lv_obj_t * colon);
 
 /* Per-screen builders. Each returns a freshly created screen object. */
 lv_obj_t * screen_home_create(void);
+lv_obj_t * screen_home_stock_create(void);   /* light tile-carousel "stock theme" home */
+lv_obj_t * screen_dim_stock_create(void);    /* stock-style standby (dim) for the stock theme */
 /* Auto-home: drop the home screen's swipe page back to page 1 (the main page)
  * when idle. No-op if already there. */
 void screen_home_reset_to_main(void);
@@ -20,6 +29,7 @@ void screen_home_set_ticker_speed(int spd);
 void screen_home_open_news(void);
 lv_obj_t * screen_thermostat_create(void);
 lv_obj_t * screen_dim_create(void);
+lv_obj_t * screen_dim_grid_create(void);   /* custom grid dim (opt-in); used by screen_dim_create */
 lv_obj_t * screen_settings_create(void);
 lv_obj_t * screen_schedule_create(void);
 lv_obj_t * screen_stats_create(void);
@@ -32,7 +42,16 @@ void screen_calendar_show(void);
 /* Home-tile layout editor ("Indeling"). */
 void screen_layout_editor_show(void);
 lv_obj_t * screen_layout_editor_create(void);
+/* Dim-screen block layout editor ("Dim indeling"). */
+void screen_dim_layout_editor_show(void);
+lv_obj_t * screen_dim_layout_editor_create(void);
+/* Boot picker layout (headless-sim render only; device path is bootpick_run). */
+lv_obj_t * screen_bootpick_create(void);
 lv_obj_t * screen_crypto_picker_create(void);   /* Settings -> Crypto coin live-search */
+lv_obj_t * screen_ha_picker_create(void);       /* Settings -> HA entity picker (domain-filtered list) */
+void screen_ha_picker_open(const char * domain, lv_obj_t * target_ta);  /* sets domain+target, then ui_push */
+void screen_ha_picker_open_add(const char * domain, int dev_type);      /* add-mode: pick -> ha_device_add */
+lv_obj_t * screen_ha_devices_create(void);      /* Settings -> Devices manager (add/remove/pin) */
 lv_obj_t * screen_crypto_create(void);           /* crypto tile-tap -> price-history graphs */
 lv_obj_t * screen_forecast_create(void);
 lv_obj_t * screen_stats_create(void);

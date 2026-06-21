@@ -21,18 +21,20 @@
     <style>
         html, body { margin: 0; padding: 0; height: 100%; background: #000;
                       overflow: hidden; touch-action: none; }
-        /* Centre the canvas and display it at its native 1024x600 AT MOST,
-           scaling DOWN (aspect-preserving) to fit smaller screens — phone,
-           tablet, or a Toon 1 browser. Never upscale past native, so a large
-           desktop monitor shows it crisp and letterboxed instead of stretched.
-           The width/height below are only a pre-JS fallback; fitCanvas() (in
-           the script) is the source of truth — it sizes against
-           window.visualViewport, which (unlike 100vw/100vh) reports the real
-           visible area on mobile, so landscape phones fit correctly too. */
+        /* Centre the canvas and scale it (aspect-preserving) up to 2x its native
+           framebuffer — on BOTH the Toon 2 (1024x600 -> 2048x1200 cap) and Toon 1
+           (800x480 -> 1600x960 cap) builds. We allow UPSCALING to 2x so the UI is
+           noticeably larger than the small native-size image, but cap it there (not
+           full-viewport) so it stays crisp and doesn't blow up on a big monitor.
+           Still bounded by the viewport so it never overflows a phone screen.
+           The width/height below are only a pre-JS fallback; fitCanvas() (in the
+           script) is the source of truth — it sizes against window.visualViewport,
+           which (unlike 100vw/100vh) reports the real visible area on mobile, so
+           landscape phones fit correctly too. */
         body { display: flex; align-items: center; justify-content: center; }
         #canvas { display: block; outline: none;
-                  width:  min(100vw, 1024px, 100vh * 1024 / 600);
-                  height: min(100vh,  600px, 100vw * 600 / 1024); }
+                  width:  min(100vw, 2048px, 100vh * 1024 / 600);
+                  height: min(100vh, 1200px, 100vw * 600 / 1024); }
         /* Slave-bridge status — top-centre, above the LVGL "tap to wake" hint
            on dim. Same 12px size kept on purpose; pointer-events:none so taps
            on the canvas under it still register. */
@@ -67,25 +69,26 @@
     const setStatus = (s) => { statusEl.textContent = s; };
 
     // ─── responsive canvas sizing ────────────────────────────────────────────
-    // We only scale the canvas DISPLAY size; the LVGL framebuffer is fixed by
-    // the build (1024x600 for the Toon 2 layout, 800x480 for the Toon 1 one).
-    // Read the native size from the canvas drawing buffer (canvas.width/height,
-    // which SDL sets to the LVGL resolution) so this one shell works for either
-    // bundle. Size against window.visualViewport (the real visible area) rather
-    // than CSS 100vw/100vh — on mobile, especially landscape with the URL bar,
-    // those units overshoot and the canvas spilled off-screen / mis-centred.
+    // We only scale the canvas DISPLAY size; the LVGL framebuffer is fixed by the
+    // build. The shipped PWA is the 1024x600 (Toon 2) bundle on BOTH Toon 1 and
+    // Toon 2, so we target the Toon 2 geometry explicitly and DISPLAY it at up to
+    // 2x — i.e. 2048x1200 — instead of deriving the cap from the native size.
+    // That keeps both devices identical (same resolution, twice as large) and
+    // avoids a Toon-1 bundle ever rendering at a different size. Size against
+    // window.visualViewport (the real visible area) rather than CSS 100vw/100vh —
+    // on mobile, especially landscape with the URL bar, those units overshoot and
+    // the canvas spilled off-screen / mis-centred.
+    const DISP_W = 2048, DISP_H = 1200;        // 1024x600 (Toon 2) x2 — the max display size
     function fitCanvas() {
         const c = document.getElementById('canvas');
         if (!c) return;
-        const NW = c.width  || 1024;           // native framebuffer = SDL/LVGL res
-        const NH = c.height ||  600;
-        const AR = NW / NH;
+        const AR = DISP_W / DISP_H;            // fixed 1024:600 aspect, independent of native fb
         const vp = window.visualViewport;
         const vw = Math.round(vp ? vp.width  : window.innerWidth);
         const vh = Math.round(vp ? vp.height : window.innerHeight);
-        let w = Math.min(vw, NW, vh * AR);     // fit width + native cap + height-bound via ratio
+        let w = Math.min(vw, DISP_W, vh * AR); // fit width, 2x cap, height-bound via ratio
         let h = w / AR;
-        if (h > vh) { h = Math.min(vh, NH); w = h * AR; }  // re-clamp if height was the limit
+        if (h > vh || h > DISP_H) { h = Math.min(vh, DISP_H); w = h * AR; }  // re-clamp on height/2x cap
         c.style.width  = Math.round(w) + 'px';
         c.style.height = Math.round(h) + 'px';
     }

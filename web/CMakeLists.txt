@@ -86,6 +86,7 @@ list(REMOVE_ITEM FT_SOURCES
     ${FREETOON}/video.c         # Toon-1 i.MX27 VPU pipeline (depends on fbdev cutout)
     ${FREETOON}/doorbell_daemon.c  # standalone daemon, own main()
     ${FREETOON}/glibc_compat_wrap.c # Toon-1 glibc-2.21 --wrap shim (linker-wrap only)
+    ${FREETOON}/glibc_compat_toon2.c # Toon-2 fcntl .symver — LLVM asm rejects .symver
 )
 
 # ---- LVGL ---------------------------------------------------------------------

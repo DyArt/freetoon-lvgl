@@ -22,6 +22,8 @@
 #include "wastecollection.h"
 #include "homewizard.h"
 #include "meteradapter.h"
+#include "ventilation.h"
+#include "efanlamp.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -134,6 +136,21 @@ static void mock_state(void) {
     hw_state.connected_p1 = 1;
     hw_state.power_w      = 384.0f;
     hw_state.gas_hour_m3  = 0.0f;   /* boiler idle → empty gas channel (visible track) */
+
+    /* Itho ventilation so the dim_stock fan spinner renders ("Low 31%"). */
+    vent_state.connected     = 1;
+    vent_state.itho_online   = 1;
+    vent_state.speed_pct     = 31;
+    vent_state.fan_rpm       = 900;
+    vent_state.remaining_min = 0;
+    snprintf(vent_state.fan_info, sizeof vent_state.fan_info, "%s", "low");
+
+    /* ESPHome BLE fan+lamp so the dim_stock BLE spinner renders. */
+    efanlamp.connected = 1;
+    efanlamp.fan_on    = 1;
+    efanlamp.fan_speed = 3;
+    efanlamp.light_on  = 1;
+    efanlamp.light_brightness = 80;
 
     /* Waste: plastic today, paper + rest later (windowed logic picks). */
     waste_state.connected = 1;

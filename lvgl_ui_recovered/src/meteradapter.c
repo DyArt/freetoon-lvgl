@@ -41,7 +41,7 @@ void meteradapter_on_flow(float watts) {
 
             /* 1. Check built-in signatures */
             for (size_t i = 0; i < sizeof nilm_sigs / sizeof nilm_sigs[0]; i++) {
-                if (adelta >= nilm_sigs[i].lo && adelta < nilm_sigs[i].hi) {
+                if (adelta >= nilm_sigs[i].lo && adelta <= nilm_sigs[i].hi) {
                     dev = nilm_sigs[i].name;
                     break;
                 }
@@ -50,7 +50,7 @@ void meteradapter_on_flow(float watts) {
             /* 2. Check custom signatures from settings */
             if (!dev) {
                 for (int i = 0; i < settings.nilm_sig_count && i < NILM_CUSTOM_MAX; i++) {
-                    if (adelta >= settings.nilm_sig_lo[i] && adelta < settings.nilm_sig_hi[i]) {
+                    if (adelta >= settings.nilm_sig_lo[i] && adelta <= settings.nilm_sig_hi[i]) {
                         dev = settings.nilm_sig_name[i];
                         break;
                     }

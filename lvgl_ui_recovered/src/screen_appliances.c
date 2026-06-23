@@ -250,11 +250,9 @@ typedef struct { float delta_w; int direction; } unk_ctx_t;
 static void on_name_unknown(lv_event_t *e) {
     unk_ctx_t *ctx = lv_event_get_user_data(e);
     if (!ctx) return;
-    float margin = ctx->delta_w * 0.20f;
-    float lo = ctx->delta_w - margin;
-    float hi = ctx->delta_w + margin;
-    if (lo < 1.0f) lo = 1.0f;
-    open_naming_modal("", lo, hi, MODAL_NEW, -1, ctx->delta_w, ctx->direction);
+    float exact = ctx->delta_w;
+    if (exact < 1.0f) exact = 1.0f;
+    open_naming_modal("", exact, exact, MODAL_NEW, -1, ctx->delta_w, ctx->direction);
 }
 
 /* ── custom sig "Edit" and "Del" taps ─────────────────────────── */

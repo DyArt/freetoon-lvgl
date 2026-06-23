@@ -323,7 +323,7 @@ int vent_send_vremote(const char * cmd) {
 
 int vent_set_speed(int pwm) {
     if (pwm < 0)   pwm = 0;
-    if (pwm > 255) pwm = 255;
+    if (pwm > 254) pwm = 254;   /* Itho rejects speed=255 with NOK */
     char url[256], body[256];
     snprintf(url, sizeof(url),
         "http://%s/api.html?speed=%d&timer=0&username=%s&password=%s",
@@ -360,8 +360,8 @@ static void * setspeed_thread(void * arg) {
 
 void vent_set_speed_async(int pwm) {
     if (pwm < 0)   pwm = 0;
-    if (pwm > 255) pwm = 255;
-    int pct = pwm * 100 / 255;
+    if (pwm > 254) pwm = 254;   /* Itho rejects speed=255 with NOK */
+    int pct = pwm * 100 / 254;
     vent_state.exh_fan_pct = pct;
     vent_state.speed_pct   = pct;   /* optimistic; MQTT corrects in ~seconds */
     /* No optimistic fan_rpm — spinner tracks real rpm (see vent_send_vremote_async). */

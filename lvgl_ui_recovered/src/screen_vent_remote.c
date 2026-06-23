@@ -68,7 +68,7 @@ static void on_slider_changed(lv_event_t * e) {
 static void on_slider_released(lv_event_t * e) {
     (void)e;
     int v = lv_slider_get_value(slider);
-    vent_set_speed_async(v * 255 / 100);
+    vent_set_speed_async(v * 254 / 100);
     last_user_ms = lv_tick_get();
 }
 

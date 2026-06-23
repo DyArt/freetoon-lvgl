@@ -214,6 +214,8 @@ typedef struct {
     char p1_elec_host[64];     /* HomeWizard P1 electricity meter */
     char p1_water_host[64];    /* HomeWizard P1 water meter */
     char vent_host[64];        /* Itho NRG-WiFi ventilation unit */
+    char efanlamp_host[64];    /* ESPHome BLE fan+lamp (ld2411-ble-fanlamp), native API */
+    char efanlamp_psk[64];     /* base64-encoded 32-byte Noise PSK for ESPHome native API */
     char opnsense_host[64];    /* router, for the "router offline" healthcheck */
 
     /* Auto-update — when on, the update checker installs a newer release

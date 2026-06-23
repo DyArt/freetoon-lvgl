@@ -49,16 +49,6 @@
 #define COL_NAME     0x2e6e3a
 #define COL_BULITIN  0x253040
 
-/* ── built-in signature table (mirror of meteradapter.c) ─────── */
-typedef struct { const char *name; float lo; float hi; } bi_sig_t;
-static const bi_sig_t builtin_sigs[] = {
-    { "Bathroom light",  13.0f,  28.0f },
-    { "Fridge",          28.0f,  43.0f },
-    { "CV boiler",       43.0f,  57.0f },
-    { "TV / Decoder",    50.0f,  75.0f },
-    { "Itho fan",       115.0f, 170.0f },
-};
-#define BUILTIN_COUNT ((int)(sizeof builtin_sigs / sizeof builtin_sigs[0]))
 
 /* ── screen state ─────────────────────────────────────────────── */
 static lv_obj_t   * scr_root     = NULL;
@@ -186,7 +176,8 @@ static void on_kb_event(lv_event_t *e) {
 }
 
 static void open_naming_modal(const char *prefill, float lo, float hi,
-                               modal_mode_t mode, int edit_idx) {
+                               modal_mode_t mode, int edit_idx,
+                               float actual_w, int direction) {
     if (g_modal) modal_close();
     g_modal_lo       = lo;
     g_modal_hi       = hi;
@@ -217,9 +208,13 @@ static void open_naming_modal(const char *prefill, float lo, float hi,
     lv_obj_set_style_text_color(title, lv_color_hex(COL_TEXT_HI), 0);
     lv_obj_set_style_text_font(title, SF(20), 0);
     char heading[80];
-    snprintf(heading, sizeof heading,
-             tr("Apparaatnaam  (%.0f - %.0f W)", "Appliance name  (%.0f - %.0f W)"),
-             (double)lo, (double)hi);
+    if (actual_w > 0.0f)
+        snprintf(heading, sizeof heading,
+                 tr("Naam voor  %s%.0f W stap", "Name for  %s%.0f W step"),
+                 direction >= 0 ? "+" : "-", (double)actual_w);
+    else
+        snprintf(heading, sizeof heading,
+                 tr("Apparaatnaam bewerken", "Edit appliance name"));
     lv_label_set_text(title, heading);
     lv_obj_align(title, LV_ALIGN_TOP_LEFT, 0, 0);
 
@@ -259,7 +254,7 @@ static void on_name_unknown(lv_event_t *e) {
     float lo = ctx->delta_w - margin;
     float hi = ctx->delta_w + margin;
     if (lo < 1.0f) lo = 1.0f;
-    open_naming_modal("", lo, hi, MODAL_NEW, -1);
+    open_naming_modal("", lo, hi, MODAL_NEW, -1, ctx->delta_w, ctx->direction);
 }
 
 /* ── custom sig "Edit" and "Del" taps ─────────────────────────── */
@@ -269,7 +264,7 @@ static void on_edit_sig(lv_event_t *e) {
     open_naming_modal(settings.nilm_sig_name[idx],
                       settings.nilm_sig_lo[idx],
                       settings.nilm_sig_hi[idx],
-                      MODAL_EDIT, idx);
+                      MODAL_EDIT, idx, 0.0f, 0);
 }
 
 static lv_obj_t *g_del_confirm = NULL;
@@ -361,7 +356,7 @@ static void rebuild_unknown_list(void) {
 
         lv_obj_t *row = mk_row(unk_cont, 56);
 
-        /* Watt label */
+        /* Watt step + age */
         char wbuf[32], agebuf[32];
         snprintf(wbuf, sizeof wbuf, "%s%.0f W",
                  u->direction > 0 ? "+" : "-", (double)u->delta_w);
@@ -370,17 +365,19 @@ static void rebuild_unknown_list(void) {
         snprintf(full, sizeof full, "%-16s  %s", wbuf, agebuf);
         mk_text(row, full, 18, COL_TEXT_HI, LV_ALIGN_LEFT_MID, SX(8), 0);
 
-        /* "Name" button — carry delta + direction as context */
+        /* Tap-to-label hint on right */
+        mk_text(row, tr("Tik om te benoemen \xef\x84\x9e",
+                        "Tap to label \xef\x84\x9e"),
+                14, COL_ACCENT, LV_ALIGN_RIGHT_MID, -SX(8), 0);
+
+        /* Whole row is the tap target */
         unk_ctx_t *ctx = malloc(sizeof *ctx);
         if (ctx) {
-            ctx->delta_w  = u->delta_w;
+            ctx->delta_w   = u->delta_w;
             ctx->direction = u->direction;
-            lv_obj_t *btn = mk_btn(row,
-                tr("Naam geven", "Name"),
-                COL_NAME, on_name_unknown, ctx,
-                LV_ALIGN_RIGHT_MID, -SX(4), 0);
-            /* free ctx when the button is deleted (row lifetime) */
-            lv_obj_add_event_cb(btn, (lv_event_cb_t)(void(*)(lv_event_t*))free,
+            lv_obj_add_flag(row, LV_OBJ_FLAG_CLICKABLE);
+            lv_obj_add_event_cb(row, on_name_unknown, LV_EVENT_CLICKED, ctx);
+            lv_obj_add_event_cb(row, (lv_event_cb_t)(void(*)(lv_event_t*))free,
                                 LV_EVENT_DELETE, ctx);
         }
     }
@@ -522,31 +519,6 @@ lv_obj_t * screen_appliances_create(void) {
     lv_obj_set_flex_flow(cust_cont, LV_FLEX_FLOW_COLUMN);
 
     rebuild_custom_list();
-
-    /* ─── SECTION: Built-in (read-only) ─── */
-    mk_section_label(scroll_cont,
-        tr("INGEBOUWD (alleen-lezen)", "BUILT-IN (read-only)"));
-
-    for (int i = 0; i < BUILTIN_COUNT; i++) {
-        lv_obj_t *row = lv_obj_create(scroll_cont);
-        lv_obj_set_size(row, LV_PCT(100), SY(48));
-        lv_obj_set_style_bg_color(row, lv_color_hex(COL_BULITIN), 0);
-        lv_obj_set_style_border_width(row, 0, 0);
-        lv_obj_set_style_radius(row, 8, 0);
-        lv_obj_set_style_pad_all(row, SY(8), 0);
-        lv_obj_clear_flag(row, LV_OBJ_FLAG_SCROLLABLE);
-
-        char txt[80];
-        snprintf(txt, sizeof txt, "%s   %.0f - %.0f W",
-                 builtin_sigs[i].name,
-                 (double)builtin_sigs[i].lo,
-                 (double)builtin_sigs[i].hi);
-        lv_obj_t *l = lv_label_create(row);
-        lv_obj_set_style_text_color(l, lv_color_hex(COL_TEXT_DIM), 0);
-        lv_obj_set_style_text_font(l, SF(16), 0);
-        lv_label_set_text(l, txt);
-        lv_obj_align(l, LV_ALIGN_LEFT_MID, SX(8), 0);
-    }
 
     /* ── Refresh timer ── */
     if (!refresh_timer)

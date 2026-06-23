@@ -332,15 +332,16 @@ lv_obj_t * screen_dim_stock_create(void) {
     lv_obj_add_flag(d_wx_icon, LV_OBJ_FLAG_HIDDEN);
 
     /* Fan spinner — to the RIGHT of the big temperature, vertically centred on it.
-     * OSL(90) label starts at y=252; cap height ≈65 px → visual centre ≈ y=284.
-     * zoom=192 → 60×60 px icon; top = 284-30 = 254. Label sits below icon. */
+     * OSL(90) digits span y=252..317 (cap→baseline, box_h≈65) → body centre ≈ y=285.
+     * With pivot (40,40) the icon's rendered centre = pos_y + 40 (pivot stays fixed
+     * under zoom), so pos_y = 285-40 = 245 to centre it on the numerals. */
     d_vent_fan = lv_img_create(scr_root);
     lv_img_set_src(d_vent_fan, &icon_fan);
     lv_img_set_zoom(d_vent_fan, 192);   /* 192/256 × 80 = 60 px */
     lv_obj_set_style_img_recolor(d_vent_fan, lv_color_hex(D_WHITE), 0);
     lv_obj_set_style_img_recolor_opa(d_vent_fan, LV_OPA_COVER, 0);
     lv_img_set_pivot(d_vent_fan, 40, 40);
-    lv_obj_set_pos(d_vent_fan, SX(912), SY(254));   /* centre ≈ (942, 284) */
+    lv_obj_set_pos(d_vent_fan, SX(912), SY(245));   /* centre ≈ (952, 285) */
     lv_obj_add_flag(d_vent_fan, LV_OBJ_FLAG_HIDDEN);
 
     d_vent_lbl = d_lbl(scr_root, "", OSR(20), D_GREY);

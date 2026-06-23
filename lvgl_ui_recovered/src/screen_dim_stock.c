@@ -281,23 +281,23 @@ lv_obj_t * screen_dim_stock_create(void) {
     lv_obj_set_style_img_recolor_opa(d_wx_icon, LV_OPA_COVER, 0);
     lv_obj_add_flag(d_wx_icon, LV_OBJ_FLAG_HIDDEN);
 
-    /* Fan spinner — sits to the RIGHT of the big temperature number, vertically
-     * centred on it (setpoint y=252, font ~130px → centre ≈ y=317).
-     * zoom=192 → 60×60 px; top = 317-30 = 287. Mode label just above the icon. */
-    d_vent_lbl = d_lbl(scr_root, "", OSR(20), D_GREY);
-    lv_obj_set_width(d_vent_lbl, SX(180));
-    lv_obj_set_style_text_align(d_vent_lbl, LV_TEXT_ALIGN_CENTER, 0);
-    lv_obj_set_pos(d_vent_lbl, SX(862), SY(248));
-    lv_obj_add_flag(d_vent_lbl, LV_OBJ_FLAG_HIDDEN);
-
+    /* Fan spinner — to the RIGHT of the big temperature, vertically centred on it.
+     * OSL(90) label starts at y=252; cap height ≈65 px → visual centre ≈ y=284.
+     * zoom=192 → 60×60 px icon; top = 284-30 = 254. Label sits below icon. */
     d_vent_fan = lv_img_create(scr_root);
     lv_img_set_src(d_vent_fan, &icon_fan);
     lv_img_set_zoom(d_vent_fan, 192);   /* 192/256 × 80 = 60 px */
     lv_obj_set_style_img_recolor(d_vent_fan, lv_color_hex(D_WHITE), 0);
     lv_obj_set_style_img_recolor_opa(d_vent_fan, LV_OPA_COVER, 0);
     lv_img_set_pivot(d_vent_fan, 40, 40);
-    lv_obj_set_pos(d_vent_fan, SX(912), SY(284));   /* centre ≈ (942, 314) */
+    lv_obj_set_pos(d_vent_fan, SX(912), SY(254));   /* centre ≈ (942, 284) */
     lv_obj_add_flag(d_vent_fan, LV_OBJ_FLAG_HIDDEN);
+
+    d_vent_lbl = d_lbl(scr_root, "", OSR(20), D_GREY);
+    lv_obj_set_width(d_vent_lbl, SX(160));
+    lv_obj_set_style_text_align(d_vent_lbl, LV_TEXT_ALIGN_CENTER, 0);
+    lv_obj_set_pos(d_vent_lbl, SX(882), SY(322));   /* below the 60px icon */
+    lv_obj_add_flag(d_vent_lbl, LV_OBJ_FLAG_HIDDEN);
 
     d_refresh(NULL);
     d_timer = lv_timer_create(d_refresh, 1000, NULL);

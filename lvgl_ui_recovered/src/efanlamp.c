@@ -29,6 +29,16 @@
 /* ── public state ───────────────────────────────────────────────────────── */
 efanlamp_state_t efanlamp = {0};
 
+/* Debug: set EFANLAMP_DEBUG env (or g_ef_verbose) to dump handshake bytes. */
+static int g_ef_verbose = 0;
+#define DBG(...) do { if (g_ef_verbose) fprintf(stderr, __VA_ARGS__); } while (0)
+static void ef_hex(const char *tag, const uint8_t *d, size_t n) {
+    if (!g_ef_verbose) return;
+    fprintf(stderr, "[efanlamp] %s (%zu):", tag, n);
+    for (size_t i = 0; i < n && i < 64; i++) fprintf(stderr, " %02x", d[i]);
+    fprintf(stderr, "\n");
+}
+
 /* ── protobuf message type IDs ─────────────────────────────────────────── */
 #define ESPHOME_MSG_HELLO_REQUEST         1
 #define ESPHOME_MSG_HELLO_RESPONSE        2
@@ -37,12 +47,13 @@ efanlamp_state_t efanlamp = {0};
 #define ESPHOME_MSG_LIST_ENTITIES_REQUEST 11
 #define ESPHOME_MSG_LIST_ENTITIES_DONE    19
 #define ESPHOME_MSG_SUBSCRIBE_STATES      20
-#define ESPHOME_MSG_LIST_ENTITIES_FAN     17
-#define ESPHOME_MSG_LIST_ENTITIES_LIGHT   16
-#define ESPHOME_MSG_FAN_STATE             25
-#define ESPHOME_MSG_LIGHT_STATE           24
-#define ESPHOME_MSG_FAN_COMMAND           30
-#define ESPHOME_MSG_LIGHT_COMMAND         32
+/* ESPHome api.proto MessageTypes (verified against a live ld2411-ble-fanlamp) */
+#define ESPHOME_MSG_LIST_ENTITIES_FAN     14   /* ListEntitiesFanResponse */
+#define ESPHOME_MSG_LIST_ENTITIES_LIGHT   15   /* ListEntitiesLightResponse */
+#define ESPHOME_MSG_FAN_STATE             23   /* FanStateResponse */
+#define ESPHOME_MSG_LIGHT_STATE           24   /* LightStateResponse */
+#define ESPHOME_MSG_FAN_COMMAND           31   /* FanCommandRequest */
+#define ESPHOME_MSG_LIGHT_COMMAND         32   /* LightCommandRequest */
 
 /* ── Noise state ────────────────────────────────────────────────────────── */
 typedef struct {
@@ -277,14 +288,19 @@ static int do_handshake(int fd, noise_ctx_t *ctx, const uint8_t psk[32]) {
     ctx->e_priv[31] |= 64;
     crypto_x25519_public_key(ctx->e_pub, ctx->e_priv);
 
+    ef_hex("e_pub", ctx->e_pub, 32);
+
     /* ── Step 1: send NOISE_HELLO + handshake msg 1 ── */
     /* hello: [0x01][0x00][0x00] */
-    if (write_noise_frame(fd, NULL, 0) < 0) return -1;
+    if (write_noise_frame(fd, NULL, 0) < 0) { DBG("[efanlamp] FAIL send hello\n"); return -1; }
 
-    /* msg1 = e.public (32) + EncryptAndHash("") (16-byte tag) = 48 bytes */
+    /* msg1 = e.public (32) + EncryptAndHash("") (16-byte tag) = 48 bytes.
+     * NNpsk0: the "e" token, because a "psk" precedes it, does MixHash AND
+     * MixKey on the ephemeral public key (Noise spec §9). */
     uint8_t msg1[48];
     memcpy(msg1, ctx->e_pub, 32);
     noise_mix_hash(&ctx->sym, ctx->e_pub, 32);
+    noise_mix_key(&ctx->sym, ctx->e_pub, 32);   /* PSK modifier on "e" */
     noise_encrypt_and_hash(&ctx->sym, NULL, 0, msg1 + 32);  /* 16-byte tag */
 
     /* frame: [0x01][uint16be: 49][0x00][48-byte msg1] */
@@ -294,28 +310,36 @@ static int do_handshake(int fd, noise_ctx_t *ctx, const uint8_t psk[32]) {
     frame1[2] = 49;   /* 1 (preamble byte \x00) + 48 */
     frame1[3] = 0x00; /* preamble byte inside frame */
     memcpy(frame1 + 4, msg1, 48);
-    if (sock_send_all(fd, frame1, 52) < 0) return -1;
+    ef_hex("send frame1", frame1, 52);
+    if (sock_send_all(fd, frame1, 52) < 0) { DBG("[efanlamp] FAIL send frame1\n"); return -1; }
 
     /* ── Step 2: receive server hello ── */
     len = read_noise_frame(fd, buf, sizeof buf);
-    if (len < 1) return -1;
+    DBG("[efanlamp] server hello frame len=%d\n", len);
+    if (len < 1) { DBG("[efanlamp] FAIL read hello (len=%d)\n", len); return -1; }
+    ef_hex("server hello", buf, (size_t)len);
     if (buf[0] != 0x01) {
         /* error response from server */
+        DBG("[efanlamp] FAIL hello indicator=0x%02x (expected 0x01)\n", buf[0]);
         return -1;
     }
     /* server name follows buf[1] as null-terminated string; ignore it */
 
     /* ── Step 3: receive server handshake message ── */
     len = read_noise_frame(fd, buf, sizeof buf);
-    if (len < 1) return -1;
-    if (buf[0] != 0x00) return -1;  /* error preamble */
+    DBG("[efanlamp] server handshake frame len=%d\n", len);
+    if (len < 1) { DBG("[efanlamp] FAIL read handshake (len=%d)\n", len); return -1; }
+    ef_hex("server handshake", buf, (size_t)len);
+    if (buf[0] != 0x00) { DBG("[efanlamp] FAIL handshake preamble=0x%02x\n", buf[0]); return -1; }  /* error preamble */
     /* buf[1:] = server msg2: e_r.public (32) + tag (16) = 48 bytes */
-    if (len < 49) return -1;
+    if (len < 49) { DBG("[efanlamp] FAIL handshake too short len=%d\n", len); return -1; }
     const uint8_t *msg2 = buf + 1;
     const uint8_t *e_r_pub = msg2;           /* 32 bytes */
     const uint8_t *tag2    = msg2 + 32;      /* 16-byte tag */
 
+    /* "e" token (PSK): MixHash AND MixKey on the server's ephemeral pubkey. */
     noise_mix_hash(&ctx->sym, e_r_pub, 32);
+    noise_mix_key(&ctx->sym, e_r_pub, 32);   /* PSK modifier on remote "e" */
 
     /* DH(e_init, e_r) */
     uint8_t ee[32];
@@ -327,7 +351,11 @@ static int do_handshake(int fd, noise_ctx_t *ctx, const uint8_t psk[32]) {
     uint8_t empty_tag[16];
     memcpy(empty_tag, tag2, 16);
     /* the "ciphertext" is just the 16-byte tag; plaintext is empty */
-    if (noise_decrypt_and_hash(&ctx->sym, empty_tag, 16, NULL) != 0) return -1;
+    if (noise_decrypt_and_hash(&ctx->sym, empty_tag, 16, NULL) != 0) {
+        DBG("[efanlamp] FAIL decrypt server tag (bad MAC) — psk/prologue mismatch\n");
+        return -1;
+    }
+    DBG("[efanlamp] handshake OK, session keys derived\n");
 
     /* ── Split: derive session keys ── */
     noise_split(&ctx->sym, ctx->send_k, ctx->recv_k);
@@ -475,7 +503,7 @@ static void handle_fan_state(const uint8_t *pb, size_t pb_len) {
     while (pb_next(&r, &field, &wire, &val, &lp, &ll) > 0) {
         if (field == 1 && wire == 5) key = (uint32_t)val;
         else if (field == 2 && wire == 0) state = (int)val;
-        else if (field == 9 && wire == 0) speed_level = (int)val;
+        else if (field == 6 && wire == 0) speed_level = (int)val;  /* FanStateResponse.speed_level = 6 */
     }
     if (key && key == g_fan_key) {
         efanlamp.fan_on    = state;
@@ -578,9 +606,9 @@ static void * light_cmd_thread(void *arg) {
     p = pb_write_bool(p, 2, 1);           /* has_state */
     p = pb_write_bool(p, 3, cmd.on);      /* state */
     if (cmd.on) {
-        p = pb_write_bool(p, 6, 1);       /* has_brightness */
+        p = pb_write_bool(p, 4, 1);       /* has_brightness = 4 */
         float bri = (float)cmd.brightness_pct / 100.f;
-        p = pb_write_float(p, 7, bri);
+        p = pb_write_float(p, 5, bri);    /* brightness = 5 */
     }
     pthread_mutex_lock(&g_send_mutex);
     send_message(g_sock, &g_ctx, ESPHOME_MSG_LIGHT_COMMAND, pb, (size_t)(p-pb));
@@ -693,12 +721,15 @@ static void * efanlamp_thread(void *arg) {
         }
 
         efanlamp.connected = 1;
+        fprintf(stderr, "[efanlamp] connected to %s:6053 (fan_key=0x%08x light_key=0x%08x)\n",
+                host, g_fan_key, g_light_key);
 
         /* Main receive loop — push updates arrive here */
         for (;;) {
             if (recv_and_dispatch(fd, &g_ctx) < 0) break;
         }
 
+        fprintf(stderr, "[efanlamp] disconnected from %s, retrying in 30s\n", host);
         efanlamp.connected = 0;
         pthread_mutex_lock(&g_send_mutex);
         close(fd); g_sock = -1;
@@ -750,3 +781,97 @@ void efanlamp_light_set(int on, int brightness_pct) {
     if (pthread_create(&t, &attr, light_cmd_thread, cmd) != 0) free(cmd);
     pthread_attr_destroy(&attr);
 }
+
+/* ── standalone test harness ─────────────────────────────────────────────
+ * Build:  gcc -DEFANLAMP_TEST_MAIN efanlamp.c sha2.c monocypher.c -lpthread -o eftest
+ * Run:    ./eftest [host] [psk_b64]
+ * Drives the real Noise handshake + entity discovery with verbose byte dumps. */
+#ifdef EFANLAMP_TEST_MAIN
+settings_t settings;  /* provide the global the client reads host/psk from */
+
+static int ef_b64(const char *s, uint8_t *out, int max) {
+    int bits = 0, n = 0; uint32_t acc = 0;
+    for (; *s && n < max; s++) {
+        int v;
+        if      (*s >= 'A' && *s <= 'Z') v = *s - 'A';
+        else if (*s >= 'a' && *s <= 'z') v = *s - 'a' + 26;
+        else if (*s >= '0' && *s <= '9') v = *s - '0' + 52;
+        else if (*s == '+') v = 62; else if (*s == '/') v = 63;
+        else if (*s == '=') break; else continue;
+        acc = (acc << 6) | (uint32_t)v; bits += 6;
+        if (bits >= 8) { bits -= 8; out[n++] = (uint8_t)(acc >> bits); }
+    }
+    return n;
+}
+
+int main(int argc, char **argv) {
+    g_ef_verbose = 1;
+    const char *host = argc > 1 ? argv[1] : "192.168.3.34";
+    const char *psk_b64 = argc > 2 ? argv[2] : "91dT9Peert6ZI1hukAy1AvUzxS0pqgdauqaf7YQ8b04=";
+    uint8_t psk[32] = {0};
+    int pn = ef_b64(psk_b64, psk, 32);
+    fprintf(stderr, "[test] host=%s psk_bytes=%d\n", host, pn);
+    ef_hex("psk", psk, 32);
+
+    int fd = socket(AF_INET, SOCK_STREAM, 0);
+    struct timeval tv = { .tv_sec = 8, .tv_usec = 0 };
+    setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof tv);
+    setsockopt(fd, SOL_SOCKET, SO_SNDTIMEO, &tv, sizeof tv);
+    struct sockaddr_in sa = {0};
+    sa.sin_family = AF_INET; sa.sin_port = htons(6053);
+    inet_pton(AF_INET, host, &sa.sin_addr);
+    if (connect(fd, (struct sockaddr *)&sa, sizeof sa) < 0) { perror("connect"); return 1; }
+    fprintf(stderr, "[test] TCP connected\n");
+
+    memset(&g_ctx, 0, sizeof g_ctx);
+    if (do_handshake(fd, &g_ctx, psk) < 0) { fprintf(stderr, "[test] HANDSHAKE FAILED\n"); return 2; }
+    fprintf(stderr, "[test] HANDSHAKE OK\n");
+    g_sock = fd;
+
+    uint8_t hp[32]; uint8_t *p = hp;
+    p = pb_write_str(p, 1, "freetoon");
+    p = pb_write_varint(pb_write_tag(p, 2, 0), 1);
+    p = pb_write_varint(pb_write_tag(p, 3, 0), 10);
+    if (send_message(fd, &g_ctx, ESPHOME_MSG_HELLO_REQUEST, hp, (size_t)(p - hp)) < 0) { fprintf(stderr,"[test] hello send fail\n"); return 3; }
+    if (recv_and_dispatch(fd, &g_ctx) < 0) { fprintf(stderr,"[test] hello resp fail\n"); return 3; }
+    fprintf(stderr, "[test] HelloResponse OK\n");
+
+    if (send_message(fd, &g_ctx, ESPHOME_MSG_CONNECT_REQUEST, NULL, 0) < 0) return 4;
+    if (recv_and_dispatch(fd, &g_ctx) < 0) { fprintf(stderr,"[test] connect resp fail\n"); return 4; }
+    fprintf(stderr, "[test] ConnectResponse OK\n");
+
+    send_message(fd, &g_ctx, ESPHOME_MSG_LIST_ENTITIES_REQUEST, NULL, 0);
+    for (int limit = 60; limit > 0; limit--) {
+        static uint8_t fb[4096], pb2[4096];
+        int flen = read_noise_frame(fd, fb, sizeof fb);
+        if (flen < 0) break;
+        if (session_decrypt(&g_ctx, fb, (size_t)flen, pb2) != 0) { fprintf(stderr,"[test] decrypt fail\n"); break; }
+        uint16_t mtype = ((uint16_t)pb2[0] << 8) | pb2[1];
+        uint16_t mlen  = ((uint16_t)pb2[2] << 8) | pb2[3];
+        size_t pt = (size_t)(flen - 16);
+        if (mlen > pt - 4) mlen = (uint16_t)(pt - 4);
+        fprintf(stderr, "[test] entity msg type=%u len=%u\n", mtype, mlen);
+        if      (mtype == ESPHOME_MSG_LIST_ENTITIES_FAN)   handle_list_fan(pb2+4, mlen);
+        else if (mtype == ESPHOME_MSG_LIST_ENTITIES_LIGHT) handle_list_light(pb2+4, mlen);
+        else if (mtype == ESPHOME_MSG_LIST_ENTITIES_DONE)  { fprintf(stderr,"[test] ListEntitiesDone\n"); break; }
+    }
+    fprintf(stderr, "[test] fan_key=0x%08x light_key=0x%08x\n", g_fan_key, g_light_key);
+
+    send_message(fd, &g_ctx, ESPHOME_MSG_SUBSCRIBE_STATES, NULL, 0);
+    fprintf(stderr, "[test] subscribed.\n");
+    /* optional command test: argv[3] = "fan:<0|1>:<speed>" e.g. fan:1:5 */
+    if (argc > 3 && strncmp(argv[3], "fan:", 4) == 0) {
+        int on = 0, spd = 3;
+        sscanf(argv[3] + 4, "%d:%d", &on, &spd);
+        fprintf(stderr, "[test] sending FanCommand on=%d speed=%d\n", on, spd);
+        efanlamp_fan_set(on, spd);
+    }
+    for (int i = 0; i < 20; i++) {
+        if (recv_and_dispatch(fd, &g_ctx) < 0) break;
+        fprintf(stderr, "[test] state: fan_on=%d speed=%d light_on=%d bri=%d\n",
+                efanlamp.fan_on, efanlamp.fan_speed, efanlamp.light_on, efanlamp.light_brightness);
+    }
+    close(fd);
+    return 0;
+}
+#endif

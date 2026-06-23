@@ -155,6 +155,9 @@ int main(int argc, char** argv) {
             fprintf(stderr, "[main] waste_start failed\n");
         if (vent_start() != 0)
             fprintf(stderr, "[main] vent_start failed\n");
+        extern int efanlamp_start(void);
+        if (efanlamp_start() != 0)
+            fprintf(stderr, "[main] efanlamp_start failed\n");
         if (ha_start() != 0)
             fprintf(stderr, "[main] ha_start failed\n");
         extern int domoticz_start(void);

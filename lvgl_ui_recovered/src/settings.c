@@ -111,6 +111,8 @@ settings_t settings = {
     .p1_elec_host        = "",
     .p1_water_host       = "",
     .vent_host           = "",
+    .efanlamp_host       = "",
+    .efanlamp_psk        = "",
     .opnsense_host       = "",
     .client_mode         = 0,
     .master_host         = "",
@@ -321,6 +323,8 @@ void settings_load(void) {
         else if (strcmp(k, "p1_elec_host")     == 0) snprintf(settings.p1_elec_host, sizeof settings.p1_elec_host, "%s", v);
         else if (strcmp(k, "p1_water_host")    == 0) snprintf(settings.p1_water_host, sizeof settings.p1_water_host, "%s", v);
         else if (strcmp(k, "vent_host")        == 0) snprintf(settings.vent_host, sizeof settings.vent_host, "%s", v);
+        else if (strcmp(k, "efanlamp_host")    == 0) snprintf(settings.efanlamp_host, sizeof settings.efanlamp_host, "%s", v);
+        else if (strcmp(k, "efanlamp_psk")     == 0) snprintf(settings.efanlamp_psk, sizeof settings.efanlamp_psk, "%s", v);
         else if (strcmp(k, "opnsense_host")    == 0) snprintf(settings.opnsense_host, sizeof settings.opnsense_host, "%s", v);
         else if (strcmp(k, "domoticz_user")   == 0)
             snprintf(settings.domoticz_user, sizeof settings.domoticz_user, "%s", v);
@@ -473,6 +477,7 @@ static void sanitize_all_strings(void) {
         settings.curtain_bat_a, settings.curtain_bat_b, settings.blinds_entity,
         settings.blinds_bat_a, settings.blinds_bat_b, settings.doorbell_entity,
         settings.doorbell_camera, settings.doorbell_stream_url, settings.vent_host,
+        settings.efanlamp_host, settings.efanlamp_psk,
         settings.opnsense_host, settings.domoticz_user, settings.domoticz_pass,
         settings.tile_slot_energy, settings.tile_slot_family, settings.tile_slot_vent,
         settings.tile_slot_water, settings.life360_a_entity, settings.life360_a_name,
@@ -541,14 +546,16 @@ void settings_save(void) {
         "\"pin_enabled\":%d,\"pin_code\":\"%s\","
         "\"weather_location\":\"%s\",\"weather_location_id\":%d,"
         "\"mqtt_enabled\":%d,\"mqtt_host\":\"%s\",\"mqtt_port\":%d,"
-        "\"mqtt_user\":\"%s\",\"mqtt_pass\":\"%s\"}",
+        "\"mqtt_user\":\"%s\",\"mqtt_pass\":\"%s\","
+        "\"home_theme\":%d}",
         settings.auto_dim_enabled, settings.auto_dim_seconds,
         settings.auto_home_enabled, settings.auto_home_seconds,
         settings.active_brightness, settings.dim_brightness,
         settings.pwa_login_enabled, eu, ep,
         settings.pin_enabled, ec,
         ewl, settings.weather_location_id,
-        settings.mqtt_enabled, emh, settings.mqtt_port, emu, emp);
+        settings.mqtt_enabled, emh, settings.mqtt_port, emu, emp,
+        settings.home_theme);
     wasm_post_settings_blob(json);
     return;     /* don't try to fopen(CFG_PATH, "w") — no /mnt/data in WASM */
 #endif
@@ -660,6 +667,8 @@ void settings_save(void) {
     fprintf(f, "p1_elec_host=%s\n", settings.p1_elec_host);
     fprintf(f, "p1_water_host=%s\n", settings.p1_water_host);
     fprintf(f, "vent_host=%s\n", settings.vent_host);
+    fprintf(f, "efanlamp_host=%s\n", settings.efanlamp_host);
+    fprintf(f, "efanlamp_psk=%s\n", settings.efanlamp_psk);
     fprintf(f, "opnsense_host=%s\n", settings.opnsense_host);
     fprintf(f, "domoticz_user=%s\n",   settings.domoticz_user);
     fprintf(f, "domoticz_pass=%s\n",   settings.domoticz_pass);

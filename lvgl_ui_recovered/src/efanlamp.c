@@ -63,6 +63,12 @@ static void ef_hex(const char *tag, const uint8_t *d, size_t n) {
 #define ESPHOME_MSG_TEXT_SENSOR_STATE         26  /* TextSensorStateResponse */
 #define ESPHOME_MSG_LIST_ENTITIES_SERVICES   41  /* ListEntitiesServicesResponse */
 #define ESPHOME_MSG_EXECUTE_SERVICE          42  /* ExecuteServiceRequest */
+/* The Jun-2026 ld2411-ble-fanlamp firmware exposes fan + light as NUMBER
+ * entities ("Fan Speed" 0..6, "Light Brightness" 0..255), NOT fan/light
+ * components — so control goes through NumberCommandRequest, not Fan/Light. */
+#define ESPHOME_MSG_LIST_ENTITIES_NUMBER     49  /* ListEntitiesNumberResponse */
+#define ESPHOME_MSG_NUMBER_STATE             50  /* NumberStateResponse */
+#define ESPHOME_MSG_NUMBER_COMMAND           51  /* NumberCommandRequest */
 
 /* ── Noise state ────────────────────────────────────────────────────────── */
 typedef struct {
@@ -87,10 +93,15 @@ typedef struct {
 } noise_ctx_t;
 
 /* entity keys discovered via ListEntities */
-static uint32_t g_fan_key    = 0;
-static uint32_t g_light_key  = 0;
+static uint32_t g_fan_key    = 0;   /* legacy ESPHome fan component (older fw) */
+static uint32_t g_light_key  = 0;   /* legacy ESPHome light component (older fw) */
 static uint32_t g_src_sensor_key = 0;
 static uint32_t g_service_key = 0;  /* key of the device 'mark_source_toon' user action */
+/* Current fw: fan + light are NUMBER entities, matched by name. */
+static uint32_t g_fan_speed_key = 0;   /* "Fan Speed" number */
+static uint32_t g_light_bri_key = 0;   /* "Light Brightness" number */
+static float    g_fan_speed_max = 6.0f;
+static float    g_light_bri_max = 255.0f;
 
 /* ── helpers ────────────────────────────────────────────────────────────── */
 static void ef_sha256(const uint8_t *data, size_t len, uint8_t out[32]) {
@@ -603,6 +614,44 @@ static void handle_list_light(const uint8_t *pb, size_t pb_len) {
         if (field == 2 && wire == 5) g_light_key = (uint32_t)val;
 }
 
+/* ListEntitiesNumberResponse: 2=key(fixed32) 3=name(string) 7=max_value(float).
+ * Current firmware models the fan + light as two numbers, matched by name. */
+static void handle_list_number(const uint8_t *pb, size_t pb_len) {
+    pb_reader_t r = { pb, pb_len };
+    int field, wire; uint64_t val = 0;
+    const uint8_t *lp = NULL; size_t ll = 0;
+    char nm[64] = ""; uint32_t key = 0; float fmax = 0;
+    while (pb_next(&r, &field, &wire, &val, &lp, &ll) > 0) {
+        if (field == 2 && wire == 5) key = (uint32_t)val;
+        else if (field == 3 && wire == 2) { size_t n = ll < 63 ? ll : 63; memcpy(nm, lp, n); nm[n] = 0; }
+        else if (field == 7 && wire == 5) { uint32_t t = (uint32_t)val; memcpy(&fmax, &t, 4); }
+    }
+    if (!strcmp(nm, "Fan Speed"))        { g_fan_speed_key = key; if (fmax > 0) g_fan_speed_max = fmax; }
+    else if (!strcmp(nm, "Light Brightness")) { g_light_bri_key = key; if (fmax > 0) g_light_bri_max = fmax; }
+}
+
+/* NumberStateResponse: 1=key(fixed32) 2=state(float). Drives the UI's fan/light
+ * state off the two numbers (0 = off). */
+static void handle_number_state(const uint8_t *pb, size_t pb_len) {
+    pb_reader_t r = { pb, pb_len };
+    int field, wire; uint64_t val = 0;
+    const uint8_t *lp = NULL; size_t ll = 0;
+    uint32_t key = 0; float state = 0; int have = 0;
+    while (pb_next(&r, &field, &wire, &val, &lp, &ll) > 0) {
+        if (field == 1 && wire == 5) key = (uint32_t)val;
+        else if (field == 2 && wire == 5) { uint32_t t = (uint32_t)val; memcpy(&state, &t, 4); have = 1; }
+    }
+    if (!have) return;
+    if (g_fan_speed_key && key == g_fan_speed_key) {
+        efanlamp.fan_speed = (int)(state + 0.5f);
+        efanlamp.fan_on    = state > 0.5f;
+    } else if (g_light_bri_key && key == g_light_bri_key) {
+        efanlamp.light_on = state > 0.5f;
+        efanlamp.light_brightness = g_light_bri_max > 0
+            ? (int)(state / g_light_bri_max * 100.0f + 0.5f) : (int)state;
+    }
+}
+
 /* ListEntitiesServicesResponse: field 1 = name (str), field 2 = key (fixed32).
    Record the key of the 'mark_source_toon' action so we can invoke it. */
 static void handle_list_services(const uint8_t *pb, size_t pb_len) {
@@ -659,6 +708,7 @@ static int recv_and_dispatch(int fd, noise_ctx_t *ctx) {
     switch (msg_type) {
         case ESPHOME_MSG_FAN_STATE:               handle_fan_state(pb, msg_len);         break;
         case ESPHOME_MSG_LIGHT_STATE:             handle_light_state(pb, msg_len);       break;
+        case ESPHOME_MSG_NUMBER_STATE:            handle_number_state(pb, msg_len);      break;
         case ESPHOME_MSG_TEXT_SENSOR_STATE:       handle_text_sensor_state(pb, msg_len); break;
         case ESPHOME_MSG_LIST_ENTITIES_FAN:       handle_list_fan(pb, msg_len);          break;
         case ESPHOME_MSG_LIST_ENTITIES_LIGHT:     handle_list_light(pb, msg_len);        break;
@@ -684,17 +734,29 @@ static void * fan_cmd_thread(void *arg) {
     free(arg);
     if (!g_ctx.handshake_done || g_sock < 0) return NULL;
 
-    uint8_t pb[32]; uint8_t *p = pb;
-    if (g_fan_key) p = pb_write_fixed32(p, 1, g_fan_key);
-    p = pb_write_bool(p, 2, 1);          /* has_state */
-    p = pb_write_bool(p, 3, cmd.on);     /* state */
-    if (cmd.on && cmd.speed > 0) {
-        p = pb_write_bool(p, 10, 1);     /* has_speed_level */
-        p = pb_write_int32(p, 11, cmd.speed);
-    }
     pthread_mutex_lock(&g_send_mutex);
     send_mark_source_toon_locked();   /* tag this change as "toon" before it lands */
-    send_message(g_sock, &g_ctx, ESPHOME_MSG_FAN_COMMAND, pb, (size_t)(p-pb));
+    if (g_fan_speed_key) {
+        /* Current fw: set the "Fan Speed" number (0 = off, 1..max = speed). */
+        float val = cmd.on ? (float)cmd.speed : 0.0f;
+        if (cmd.on && val < 1.0f) val = 1.0f;
+        if (val > g_fan_speed_max) val = g_fan_speed_max;
+        uint8_t pb[16]; uint8_t *p = pb;
+        p = pb_write_fixed32(p, 1, g_fan_speed_key);   /* NumberCommandRequest.key */
+        p = pb_write_float(p, 2, val);                 /* NumberCommandRequest.state */
+        send_message(g_sock, &g_ctx, ESPHOME_MSG_NUMBER_COMMAND, pb, (size_t)(p-pb));
+    } else if (g_fan_key) {
+        /* Legacy fw: real ESPHome fan component. */
+        uint8_t pb[32]; uint8_t *p = pb;
+        p = pb_write_fixed32(p, 1, g_fan_key);
+        p = pb_write_bool(p, 2, 1);
+        p = pb_write_bool(p, 3, cmd.on);
+        if (cmd.on && cmd.speed > 0) {
+            p = pb_write_bool(p, 10, 1);
+            p = pb_write_int32(p, 11, cmd.speed);
+        }
+        send_message(g_sock, &g_ctx, ESPHOME_MSG_FAN_COMMAND, pb, (size_t)(p-pb));
+    }
     pthread_mutex_unlock(&g_send_mutex);
     return NULL;
 }
@@ -704,18 +766,29 @@ static void * light_cmd_thread(void *arg) {
     free(arg);
     if (!g_ctx.handshake_done || g_sock < 0) return NULL;
 
-    uint8_t pb[48]; uint8_t *p = pb;
-    if (g_light_key) p = pb_write_fixed32(p, 1, g_light_key);
-    p = pb_write_bool(p, 2, 1);           /* has_state */
-    p = pb_write_bool(p, 3, cmd.on);      /* state */
-    if (cmd.on) {
-        p = pb_write_bool(p, 4, 1);       /* has_brightness = 4 */
-        float bri = (float)cmd.brightness_pct / 100.f;
-        p = pb_write_float(p, 5, bri);    /* brightness = 5 */
-    }
     pthread_mutex_lock(&g_send_mutex);
     send_mark_source_toon_locked();   /* tag this change as "toon" before it lands */
-    send_message(g_sock, &g_ctx, ESPHOME_MSG_LIGHT_COMMAND, pb, (size_t)(p-pb));
+    if (g_light_bri_key) {
+        /* Current fw: set the "Light Brightness" number (0 = off, scaled to max). */
+        float val = cmd.on ? ((float)cmd.brightness_pct / 100.0f * g_light_bri_max) : 0.0f;
+        if (cmd.on && val < 1.0f) val = 1.0f;
+        if (val > g_light_bri_max) val = g_light_bri_max;
+        uint8_t pb[16]; uint8_t *p = pb;
+        p = pb_write_fixed32(p, 1, g_light_bri_key);
+        p = pb_write_float(p, 2, val);
+        send_message(g_sock, &g_ctx, ESPHOME_MSG_NUMBER_COMMAND, pb, (size_t)(p-pb));
+    } else if (g_light_key) {
+        /* Legacy fw: real ESPHome light component. */
+        uint8_t pb[48]; uint8_t *p = pb;
+        p = pb_write_fixed32(p, 1, g_light_key);
+        p = pb_write_bool(p, 2, 1);
+        p = pb_write_bool(p, 3, cmd.on);
+        if (cmd.on) {
+            p = pb_write_bool(p, 4, 1);
+            p = pb_write_float(p, 5, (float)cmd.brightness_pct / 100.f);
+        }
+        send_message(g_sock, &g_ctx, ESPHOME_MSG_LIGHT_COMMAND, pb, (size_t)(p-pb));
+    }
     pthread_mutex_unlock(&g_send_mutex);
     return NULL;
 }
@@ -840,6 +913,7 @@ static void * efanlamp_thread(void *arg) {
             if (mlen > pt_len2 - 4) mlen = (uint16_t)(pt_len2 - 4);
             if      (mtype == ESPHOME_MSG_LIST_ENTITIES_FAN)   handle_list_fan(pb2+4, mlen);
             else if (mtype == ESPHOME_MSG_LIST_ENTITIES_LIGHT)  handle_list_light(pb2+4, mlen);
+            else if (mtype == ESPHOME_MSG_LIST_ENTITIES_NUMBER) handle_list_number(pb2+4, mlen);
             else if (mtype == ESPHOME_MSG_LIST_ENTITIES_SERVICES) handle_list_services(pb2+4, mlen);
             else if (mtype == ESPHOME_MSG_LIST_ENTITIES_DONE)   break;
         }
@@ -850,8 +924,10 @@ static void * efanlamp_thread(void *arg) {
         }
 
         efanlamp.connected = 1;
-        fprintf(stderr, "[efanlamp] connected to %s:6053 (fan_key=0x%08x light_key=0x%08x)\n",
-                host, g_fan_key, g_light_key);
+        fprintf(stderr, "[efanlamp] connected to %s:6053 (fan_speed_key=0x%08x[max%.0f] "
+                "light_bri_key=0x%08x[max%.0f] fan_key=0x%08x light_key=0x%08x)\n",
+                host, g_fan_speed_key, g_fan_speed_max, g_light_bri_key, g_light_bri_max,
+                g_fan_key, g_light_key);
 
         /* Main receive loop — push updates arrive here */
         for (;;) {
@@ -992,8 +1068,23 @@ int main(int argc, char **argv) {
         size_t pt = (size_t)(flen - 16);
         if (mlen > pt - 4) mlen = (uint16_t)(pt - 4);
         fprintf(stderr, "[test] entity msg type=%u len=%u\n", mtype, mlen);
+        { pb_reader_t rr = { pb2 + 4, mlen }; int f, w; uint64_t v;
+          const uint8_t *lpp = NULL; size_t ll = 0;
+          char oid[80] = ""; char nm[80] = ""; uint32_t key = 0;
+          float fmin = 0, fmax = 0, fstep = 0;
+          while (pb_next(&rr, &f, &w, &v, &lpp, &ll) > 0) {
+              if (f == 1 && w == 2) { size_t n = ll < 79 ? ll : 79; memcpy(oid, lpp, n); oid[n] = 0; }
+              else if (f == 2 && w == 5) key = (uint32_t)v;
+              else if (f == 3 && w == 2) { size_t n = ll < 79 ? ll : 79; memcpy(nm, lpp, n); nm[n] = 0; }
+              else if (f == 6 && w == 5) { uint32_t t=(uint32_t)v; memcpy(&fmin,&t,4); }
+              else if (f == 7 && w == 5) { uint32_t t=(uint32_t)v; memcpy(&fmax,&t,4); }
+              else if (f == 8 && w == 5) { uint32_t t=(uint32_t)v; memcpy(&fstep,&t,4); }
+          }
+          fprintf(stderr, "        -> name='%s' key=0x%08x min=%.2f max=%.2f step=%.2f\n", nm, key, fmin, fmax, fstep);
+        }
         if      (mtype == ESPHOME_MSG_LIST_ENTITIES_FAN)   handle_list_fan(pb2+4, mlen);
         else if (mtype == ESPHOME_MSG_LIST_ENTITIES_LIGHT) handle_list_light(pb2+4, mlen);
+        else if (mtype == ESPHOME_MSG_LIST_ENTITIES_NUMBER) handle_list_number(pb2+4, mlen);
         else if (mtype == ESPHOME_MSG_LIST_ENTITIES_SERVICES) handle_list_services(pb2+4, mlen);
         else if (mtype == ESPHOME_MSG_LIST_ENTITIES_DONE)  { fprintf(stderr,"[test] ListEntitiesDone\n"); break; }
     }
@@ -1015,6 +1106,12 @@ int main(int argc, char **argv) {
         sscanf(argv[3] + 4, "%d:%d", &on, &spd);
         fprintf(stderr, "[test] sending FanCommand on=%d speed=%d\n", on, spd);
         efanlamp_fan_set(on, spd);
+    }
+    if (argc > 3 && strncmp(argv[3], "light:", 6) == 0) {
+        int on = 0, pct = 50;
+        sscanf(argv[3] + 6, "%d:%d", &on, &pct);
+        fprintf(stderr, "[test] sending LightCommand on=%d pct=%d\n", on, pct);
+        efanlamp_light_set(on, pct);
     }
 
     int iters = watch_logs ? 100000 : 20;

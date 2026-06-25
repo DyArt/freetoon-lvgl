@@ -23,6 +23,7 @@
 #include <pthread.h>
 #include <sys/socket.h>
 #include <netinet/in.h>
+#include <netinet/tcp.h>
 #include <arpa/inet.h>
 #include <time.h>
 
@@ -239,10 +240,25 @@ static int sock_send_all(int fd, const uint8_t *buf, size_t len) {
 }
 
 static int sock_recv_all(int fd, uint8_t *buf, size_t len) {
+    /* A 10s SO_RCVTIMEO fires EAGAIN on an idle socket — that is NOT a dead
+     * link, it just means the device had nothing to send for 10s. Treating it
+     * as fatal (the old `n <= 0`) tore the connection down on every quiet
+     * spell / backpressure stall, which made freetoon flap and ultimately
+     * armed the device's 15-min "No clients; rebooting" timeout. Retry on
+     * timeout/EINTR and only give up after a long silence (~90s, well past the
+     * device's keepalive ping interval); genuine peer death still surfaces as
+     * recv()==0 / a hard errno, and SO_KEEPALIVE is the backstop. */
+    int stalls = 0;
     while (len > 0) {
         ssize_t n = recv(fd, buf, len, 0);
-        if (n <= 0) return -1;
-        buf += n; len -= n;
+        if (n > 0) { buf += n; len -= n; stalls = 0; continue; }
+        if (n == 0) return -1;                              /* peer closed */
+        if (errno == EINTR) continue;                       /* interrupted */
+        if (errno == EAGAIN || errno == EWOULDBLOCK) {      /* idle timeout */
+            if (++stalls >= 9) return -1;                   /* ~90s silent → dead */
+            continue;
+        }
+        return -1;                                          /* real error */
     }
     return 0;
 }
@@ -738,6 +754,23 @@ static void * efanlamp_thread(void *arg) {
         struct timeval tv = { .tv_sec = 10, .tv_usec = 0 };
         setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof tv);
         setsockopt(fd, SOL_SOCKET, SO_SNDTIMEO, &tv, sizeof tv);
+        /* Detect a genuinely dead peer fast (~60s) without falsely killing an
+         * idle-but-alive link — this is the backstop for the EAGAIN-tolerant
+         * recv loop above. */
+        int ka = 1;
+        setsockopt(fd, SOL_SOCKET, SO_KEEPALIVE, &ka, sizeof ka);
+#ifdef TCP_KEEPIDLE
+        int kidle = 30, kintvl = 10, kcnt = 3;
+        setsockopt(fd, IPPROTO_TCP, TCP_KEEPIDLE,  &kidle,  sizeof kidle);
+        setsockopt(fd, IPPROTO_TCP, TCP_KEEPINTVL, &kintvl, sizeof kintvl);
+        setsockopt(fd, IPPROTO_TCP, TCP_KEEPCNT,   &kcnt,   sizeof kcnt);
+#endif
+        /* Larger kernel RX buffer so a burst of subscribed state updates (the
+         * LD2411 presence firehose) is absorbed instead of backpressuring the
+         * device's send buffer — that backpressure is what got freetoon flagged
+         * "unresponsive". */
+        int rcvbuf = 64 * 1024;
+        setsockopt(fd, SOL_SOCKET, SO_RCVBUF, &rcvbuf, sizeof rcvbuf);
 
         struct sockaddr_in sa = {0};
         sa.sin_family = AF_INET;
@@ -746,14 +779,14 @@ static void * efanlamp_thread(void *arg) {
             sa.sin_addr.s_addr = inet_addr(host);
 
         if (connect(fd, (struct sockaddr *)&sa, sizeof sa) < 0) {
-            close(fd); sleep(30); continue;
+            close(fd); sleep(15); continue;   /* device unreachable — don't hammer */
         }
 
         /* Noise handshake */
         memset(&g_ctx, 0, sizeof g_ctx);
         if (do_handshake(fd, &g_ctx, psk) < 0) {
             efanlamp.connected = 0;
-            close(fd); sleep(30); continue;
+            close(fd); sleep(5); continue;
         }
 
         /* HelloRequest */
@@ -767,7 +800,7 @@ static void * efanlamp_thread(void *arg) {
 
         if (send_message(fd, &g_ctx, ESPHOME_MSG_HELLO_REQUEST,
                          hello_pb, (size_t)(p - hello_pb)) < 0) {
-            efanlamp.connected = 0; close(fd); g_sock = -1; sleep(30); continue;
+            efanlamp.connected = 0; close(fd); g_sock = -1; sleep(5); continue;
         }
         /* ESPHome 2026.1.0+: auth happens at Hello time; server may push log frames
          * (from on_client_connected) before sending HelloResponse. Read until type 2. */
@@ -785,14 +818,14 @@ static void * efanlamp_thread(void *arg) {
                 /* else: log/status frame from on_client_connected — discard and loop */
             }
             if (!hello_done) {
-                efanlamp.connected = 0; close(fd); g_sock = -1; sleep(30); continue;
+                efanlamp.connected = 0; close(fd); g_sock = -1; sleep(5); continue;
             }
         }
         /* No ConnectRequest — removed in ESPHome 2026.1.0; server auto-authenticates at Hello */
 
         /* ListEntitiesRequest to discover fan + light keys */
         if (send_message(fd, &g_ctx, ESPHOME_MSG_LIST_ENTITIES_REQUEST, NULL, 0) < 0) {
-            efanlamp.connected = 0; close(fd); g_sock = -1; sleep(30); continue;
+            efanlamp.connected = 0; close(fd); g_sock = -1; sleep(5); continue;
         }
         /* Read until ListEntitiesDone */
         for (int limit = 50; limit > 0; limit--) {
@@ -813,7 +846,7 @@ static void * efanlamp_thread(void *arg) {
 
         /* SubscribeStatesRequest */
         if (send_message(fd, &g_ctx, ESPHOME_MSG_SUBSCRIBE_STATES, NULL, 0) < 0) {
-            efanlamp.connected = 0; close(fd); g_sock = -1; sleep(30); continue;
+            efanlamp.connected = 0; close(fd); g_sock = -1; sleep(5); continue;
         }
 
         efanlamp.connected = 1;
@@ -825,12 +858,13 @@ static void * efanlamp_thread(void *arg) {
             if (recv_and_dispatch(fd, &g_ctx) < 0) break;
         }
 
-        fprintf(stderr, "[efanlamp] disconnected from %s, retrying in 30s\n", host);
+        fprintf(stderr, "[efanlamp] disconnected from %s, retrying in 5s\n", host);
         efanlamp.connected = 0;
         pthread_mutex_lock(&g_send_mutex);
         close(fd); g_sock = -1;
         pthread_mutex_unlock(&g_send_mutex);
-        sleep(30);
+        sleep(5);   /* reconnect fast: freetoon is the always-on client that keeps
+                       the device's client-count > 0 and prevents its 15-min reboot */
     }
     return NULL;
 }

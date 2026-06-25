@@ -180,7 +180,7 @@ static void mock_state(void) {
         snprintf(settings.life360_a_entity, sizeof settings.life360_a_entity, "device_tracker.auto");
         snprintf(settings.life360_a_name,   sizeof settings.life360_a_name,   "Auto");
         snprintf(settings.life360_b_entity, sizeof settings.life360_b_entity, "device_tracker.google_pixel_6a");
-        snprintf(settings.life360_b_name,   sizeof settings.life360_b_name,   "Telefoon");
+        snprintf(settings.life360_b_name,   sizeof settings.life360_b_name,   "Ronald");
         snprintf(settings.life360_c_entity, sizeof settings.life360_c_entity, "device_tracker.life360_member");
         snprintf(settings.life360_c_name,   sizeof settings.life360_c_name,   "Caja");
         snprintf(ha_state.loc_a, sizeof ha_state.loc_a, "Niet thuis");

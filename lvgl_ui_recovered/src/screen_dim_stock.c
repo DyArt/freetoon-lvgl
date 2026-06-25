@@ -15,6 +15,7 @@
 #include "fonts_opensans.h"
 #include "boxtalk.h"
 #include "settings.h"
+#include "homeassistant.h"
 #include "meteradapter.h"
 #include "homewizard.h"
 #include "weather.h"
@@ -36,6 +37,7 @@ static lv_obj_t * scr_root = NULL;
 static lv_obj_t * d_clock, * d_date, * d_water, * d_water_ts, * d_setpoint, * d_eco, * d_prog;
 static lv_obj_t * d_water_banner, * d_watts;
 static lv_obj_t * d_wx_icon, * d_wx_temp;   /* outside weather, top-right */
+static lv_obj_t * d_trk[3] = { NULL, NULL, NULL };   /* tracker lines, top-centre */
 static lv_obj_t * d_vent_fan = NULL;         /* Itho spinning fan icon */
 static lv_obj_t * d_vent_lbl = NULL;         /* Itho mode + % label */
 static int        d_vent_period_ms = 0;
@@ -187,6 +189,27 @@ static void d_refresh(lv_timer_t * t) {
         } else {
             lv_obj_add_flag(d_wx_icon, LV_OBJ_FLAG_HIDDEN);
             lv_label_set_text(d_wx_temp, "");
+        }
+    }
+
+    /* Trackers — one line per configured tracker (Name: location). */
+    {
+        const struct { const char * name; const char * entity; const char * loc; } trk[3] = {
+            { settings.life360_a_name, settings.life360_a_entity, ha_state.loc_a },
+            { settings.life360_b_name, settings.life360_b_entity, ha_state.loc_b },
+            { settings.life360_c_name, settings.life360_c_entity, ha_state.loc_c },
+        };
+        for (int i = 0; i < 3; i++) {
+            if (!d_trk[i]) continue;
+            if (settings.enable_ha && trk[i].entity[0]) {
+                const char * nm = trk[i].name[0] ? trk[i].name : trk[i].entity;
+                const char * lc = trk[i].loc[0]  ? trk[i].loc  : "--";
+                snprintf(b, sizeof b, "%s: %s", nm, lc);
+                lv_label_set_text(d_trk[i], b);
+                lv_obj_clear_flag(d_trk[i], LV_OBJ_FLAG_HIDDEN);
+            } else {
+                lv_obj_add_flag(d_trk[i], LV_OBJ_FLAG_HIDDEN);
+            }
         }
     }
 
@@ -353,6 +376,16 @@ lv_obj_t * screen_dim_stock_create(void) {
     lv_obj_set_style_img_recolor(d_wx_icon, lv_color_hex(0xffffff), 0);   /* all white */
     lv_obj_set_style_img_recolor_opa(d_wx_icon, LV_OPA_COVER, 0);
     lv_obj_add_flag(d_wx_icon, LV_OBJ_FLAG_HIDDEN);
+
+    /* Trackers — top-centre stack (between the brand and the weather), up to
+     * three "Name: location" lines. Hidden until configured + HA delivers. */
+    for (int i = 0; i < 3; i++) {
+        d_trk[i] = d_lbl(scr_root, "", OSR(20), D_WHITE);
+        lv_obj_set_width(d_trk[i], SX(340));
+        lv_label_set_long_mode(d_trk[i], LV_LABEL_LONG_DOT);   /* one line; ellipsize, never wrap */
+        lv_obj_set_pos(d_trk[i], SX(372), SY(34 + i * 34));
+        lv_obj_add_flag(d_trk[i], LV_OBJ_FLAG_HIDDEN);
+    }
 
     /* Fan spinner — to the RIGHT of the big temperature, vertically centred on it.
      * OSL(90) digits span y=252..317 (cap→baseline, box_h≈65) → body centre ≈ y=285.

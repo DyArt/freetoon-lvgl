@@ -19,6 +19,7 @@
 #include "icons.h"
 #include "settings.h"
 #include "homeassistant.h"
+#include "efanlamp.h"
 #include "meteradapter.h"
 #include "homewizard.h"
 #include "weather.h"
@@ -56,11 +57,11 @@
 #define N_ESEG  12
 
 /* ---- tile types ---------------------------------------------------------- */
-enum { LINK_NONE = 0, LINK_STATS, LINK_FORECAST, LINK_HEATER, LINK_VENT, LINK_TRACKERS };
+enum { LINK_NONE = 0, LINK_STATS, LINK_FORECAST, LINK_HEATER, LINK_VENT, LINK_TRACKERS, LINK_EFAN };
 typedef enum {
     TT_EMPTY = 0, TT_CLOCK, TT_HUMID, TT_POWER, TT_WATERP, TT_INDOOR,
     TT_CO2, TT_TVOC, TT_WEATHER, TT_BOILIN, TT_BOILOUT, TT_GAS, TT_VENT,
-    TT_AGENDA, TT_TRACKERS, TT_COUNT
+    TT_AGENDA, TT_TRACKERS, TT_EFAN, TT_COUNT
 } ttype_t;
 static const struct { const char * key; const char * nl; const char * en; int link; } TM[TT_COUNT] = {
     { "empty",   "Verwijderen",   "Remove",       LINK_NONE     },
@@ -78,6 +79,7 @@ static const struct { const char * key; const char * nl; const char * en; int li
     { "vent",    "Ventilatie",    "Ventilation",  LINK_VENT     },
     { "agenda",  "Agenda",        "Calendar",     LINK_NONE     },
     { "trackers","Trackers",      "Trackers",     LINK_TRACKERS },
+    { "efan",    "Ventilator",    "Fan + Lamp",   LINK_EFAN     },
 };
 
 typedef struct {
@@ -300,6 +302,15 @@ static void render_slot(slot_t * s) {
         lv_obj_set_style_text_align(s->val, LV_TEXT_ALIGN_LEFT, 0);
         lv_obj_align(s->val, LV_ALIGN_TOP_LEFT, SX(14), SY(48));
         break;
+    case TT_EFAN:
+        /* BLE ceiling fan + lamp status (two lines). Tap opens the full control
+         * screen (LINK_EFAN). */
+        s->val = mklabel(s->card, "", OSR(20), C_TITLE);
+        lv_label_set_long_mode(s->val, LV_LABEL_LONG_WRAP);
+        lv_obj_set_width(s->val, SX(G_COLW - 28));
+        lv_obj_set_style_text_align(s->val, LV_TEXT_ALIGN_CENTER, 0);
+        lv_obj_align(s->val, LV_ALIGN_CENTER, 0, SY(8));
+        break;
     default: {
         /* big Open Sans Light is glyph-subset (digits/°/bar/Watt); values with
          * arbitrary letters (ppm/ppb/m3) need the full-Latin Regular face. */
@@ -384,6 +395,16 @@ static void refresh_slot(slot_t * s) {
         if (!any) snprintf(tb, sizeof tb, "%s", tr("Geen trackers", "No trackers"));
         lv_label_set_text(s->val, tb);
         break; }
+    case TT_EFAN: {
+        char fan[28], lamp[28], eb[64];
+        if (!efanlamp.connected) { lv_label_set_text(s->val, tr("Niet verbonden", "Not connected")); break; }
+        if (efanlamp.fan_on) snprintf(fan, sizeof fan, tr("Vent: stand %d", "Fan: speed %d"), efanlamp.fan_speed);
+        else                 snprintf(fan, sizeof fan, "%s", tr("Vent: uit", "Fan: off"));
+        if (efanlamp.light_on) snprintf(lamp, sizeof lamp, tr("Lamp: %d%%", "Lamp: %d%%"), efanlamp.light_brightness);
+        else                   snprintf(lamp, sizeof lamp, "%s", tr("Lamp: uit", "Lamp: off"));
+        snprintf(eb, sizeof eb, "%s\n%s", fan, lamp);
+        lv_label_set_text(s->val, eb);
+        break; }
     case TT_WEATHER: {
         snprintf(b, sizeof b, "%.1f°", weather_state.current_temp); comma(b); lv_label_set_text(s->val, b);
         lv_label_set_text(s->sub, weather_state.current_desc[0] ? weather_state.current_desc : tr("Buiten", "Outside"));
@@ -417,6 +438,7 @@ static void on_slot_click(lv_event_t * e) {
         case LINK_HEATER:   ui_push(screen_heater_advanced_create()); break;
         case LINK_VENT:     ui_push(screen_vent_remote_create());     break;
         case LINK_TRACKERS: life360_map_open();                       break;
+        case LINK_EFAN:     ui_push(screen_efanlamp_create());        break;
     }
 }
 

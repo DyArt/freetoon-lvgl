@@ -187,7 +187,10 @@ static void mock_state(void) {
         snprintf(ha_state.loc_b, sizeof ha_state.loc_b, "Thuis");
         snprintf(ha_state.loc_c, sizeof ha_state.loc_c, "Breezand");
         snprintf(settings.stock_tiles, sizeof settings.stock_tiles,
-                 "clock,trackers,power,waterp,indoor,weather,vent,agenda,empty,empty,empty,empty,empty,empty,empty,empty");
+                 "clock,trackers,efan,power,indoor,weather,vent,agenda,empty,empty,empty,empty,empty,empty,empty,empty");
+        extern efanlamp_state_t efanlamp;
+        efanlamp.connected = 1; efanlamp.fan_on = 1; efanlamp.fan_speed = 3;
+        efanlamp.light_on = 1;  efanlamp.light_brightness = 50;
     }
     struct { int type; const char * ent; const char * name; int on; int bri; int pos; int pin; } d[] = {
         { HADEV_LIGHT,  "light.woonkamer",  "Woonkamer",   1, 200, -1, 0 },

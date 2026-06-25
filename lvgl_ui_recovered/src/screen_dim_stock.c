@@ -138,7 +138,6 @@ static void d_vent_apply_anim(int rpm) {
 }
 
 static void on_wake(lv_event_t * e) { (void)e; ui_wake_now(); }
-static void efanlamp_fan_toggle_cb(lv_event_t * e) { (void)e; efanlamp_fan_toggle(); }
 
 static void d_refresh(lv_timer_t * t) {
     (void)t;
@@ -415,8 +414,9 @@ lv_obj_t * screen_dim_stock_create(void) {
     lv_img_set_pivot(d_efan_fan, 40, 40);
     lv_obj_set_pos(d_efan_fan, SX(912), SY(370));
     lv_obj_add_flag(d_efan_fan, LV_OBJ_FLAG_HIDDEN);
-    lv_obj_add_event_cb(d_efan_fan, (lv_event_cb_t)efanlamp_fan_toggle_cb, LV_EVENT_CLICKED, NULL);
-    lv_obj_add_flag(d_efan_fan, LV_OBJ_FLAG_CLICKABLE);
+    /* Display-only: NOT clickable. A tap on the fan icon in dim state falls
+     * through to scr_root's on_wake (just wakes the screen) instead of toggling
+     * the fan — avoids accidentally switching the fan when reaching to wake. */
 
     d_efan_lbl = d_lbl(scr_root, "", OSR(20), D_GREY);
     lv_obj_set_width(d_efan_lbl, SX(160));

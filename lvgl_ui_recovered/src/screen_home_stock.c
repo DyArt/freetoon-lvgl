@@ -27,6 +27,7 @@
 #include "ventilation.h"
 #include "calendar.h"
 #include "domoticz.h"
+#include "schedule.h"
 #include <stdio.h>
 #include <string.h>
 #include <time.h>
@@ -58,11 +59,11 @@
 #define N_ESEG  12
 
 /* ---- tile types ---------------------------------------------------------- */
-enum { LINK_NONE = 0, LINK_STATS, LINK_FORECAST, LINK_HEATER, LINK_VENT, LINK_TRACKERS, LINK_EFAN };
+enum { LINK_NONE = 0, LINK_STATS, LINK_FORECAST, LINK_HEATER, LINK_VENT, LINK_TRACKERS, LINK_EFAN, LINK_SCHED };
 typedef enum {
     TT_EMPTY = 0, TT_CLOCK, TT_HUMID, TT_POWER, TT_WATERP, TT_INDOOR,
     TT_CO2, TT_TVOC, TT_WEATHER, TT_BOILIN, TT_BOILOUT, TT_GAS, TT_VENT,
-    TT_AGENDA, TT_TRACKERS, TT_EFAN, TT_SOLAR, TT_COUNT
+    TT_AGENDA, TT_TRACKERS, TT_EFAN, TT_SOLAR, TT_SCHED, TT_COUNT
 } ttype_t;
 static const struct { const char * key; const char * nl; const char * en; int link; } TM[TT_COUNT] = {
     { "empty",   "Verwijderen",   "Remove",       LINK_NONE     },
@@ -82,6 +83,7 @@ static const struct { const char * key; const char * nl; const char * en; int li
     { "trackers","Trackers",      "Trackers",     LINK_TRACKERS },
     { "efan",    "Ventilator",    "Fan + Lamp",   LINK_EFAN     },
     { "solar",   "Zonnepanelen",  "Solar",        LINK_STATS    },
+    { "sched",   "Programma",     "Schedule",     LINK_SCHED    },
 };
 
 typedef struct {
@@ -318,6 +320,14 @@ static void render_slot(slot_t * s) {
         lv_obj_set_style_text_align(s->val, LV_TEXT_ALIGN_LEFT, 0);
         lv_obj_align(s->val, LV_ALIGN_TOP_LEFT, SX(14), SY(48));
         break;
+    case TT_SCHED:
+        /* Opens the weekly planner (screen_schedule). Current preset from the
+         * already-loaded schedule; no I/O here (runs on the LVGL thread). */
+        s->val = mklabel(s->card, tr("Weekplanner", "Weekly planner"), OSR(24), C_TITLE);
+        lv_obj_align(s->val, LV_ALIGN_CENTER, 0, SY(-4));
+        s->sub = mklabel(s->card, "", OSR(15), C_SECOND);
+        lv_obj_align(s->sub, LV_ALIGN_CENTER, 0, SY(30));
+        break;
     case TT_EFAN:
         /* BLE ceiling fan + lamp status (two lines). Tap opens the full control
          * screen (LINK_EFAN). */
@@ -421,6 +431,10 @@ static void refresh_slot(slot_t * s) {
         snprintf(eb, sizeof eb, "%s\n%s", fan, lamp);
         lv_label_set_text(s->val, eb);
         break; }
+    case TT_SCHED: {
+        int st = schedule_count > 0 ? schedule_program_now() : -1;
+        lv_label_set_text(s->sub, st >= 0 ? schedule_state_name(st) : tr("Tik om te wijzigen", "Tap to edit"));
+        break; }
     case TT_SOLAR: {
         /* Gross production from the configured HA sensor. Deliberately not
          * derived from the P1: a meter only sees the surplus that actually
@@ -482,6 +496,7 @@ static void on_slot_click(lv_event_t * e) {
         case LINK_VENT:     ui_push(screen_vent_remote_create());     break;
         case LINK_TRACKERS: life360_map_open();                       break;
         case LINK_EFAN:     ui_push(screen_efanlamp_create());        break;
+        case LINK_SCHED:    ui_push(screen_schedule_create());        break;
     }
 }
 

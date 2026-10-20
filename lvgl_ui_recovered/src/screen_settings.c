@@ -1177,6 +1177,11 @@ static void on_uimode_to_qtgui(lv_event_t * e) {
     lv_obj_center(b_yes_l);
 }
 
+/* Programma tile: open the weekly heating planner. */
+static void open_schedule(lv_event_t * e) {
+    (void)e;
+    ui_push(screen_schedule_create());
+}
 /* Marketplace tile-tap: push the marketplace browser screen onto the
  * navigation stack. The browser does its own HTTP fetch in a background
  * thread, so this returns immediately. */
@@ -3858,6 +3863,8 @@ lv_obj_t * screen_settings_create(void) {
               tr("ophaalmeldingen", "pickup alerts"), open_waste_modal); n++;
     make_tile(GX(n), GY(n), &icon_flame, NULL, tr("Verwarming", "Heating"),
               tr("correctie, keteltype", "offset, boiler type"), open_heating_modal); n++;
+    make_tile(GX(n), GY(n), NULL, LV_SYMBOL_LIST, tr("Programma", "Schedule"),
+              tr("weekplanner verwarming", "weekly heating planner"), open_schedule); n++;
     make_tile(GX(n), GY(n), NULL, LV_SYMBOL_GPS, "OT Bridge",
               tr("uit / proxy / draadloos", "off / proxy / wireless"), open_otbridge_modal); n++;
     make_tile(GX(n), GY(n), NULL, LV_SYMBOL_WIFI, "MQTT",
